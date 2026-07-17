@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Canaledu — Selecionar Emissora</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="version.js"></script>
+<script src="emissora.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100vh;
+    font-family: 'IBM Plex Sans', -apple-system, system-ui, sans-serif;
+    background: linear-gradient(135deg, #0f1117 0%, #1a1d29 100%);
+    color: #e2e8f0;
+  }
+  .wrap {
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px 20px;
+  }
+  header.top {
+    text-align: center; margin-bottom: 40px;
+  }
+  header.top h1 {
+    margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -0.02em;
+  }
+  header.top p {
+    margin: 0; color: #8891b0; font-size: 15px;
+  }
+  .cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 340px));
+    gap: 20px; width: 100%; max-width: 740px;
+  }
+  .card {
+    background: #171923;
+    border: 1px solid #2a2f45;
+    border-radius: 14px;
+    padding: 28px 24px;
+    cursor: pointer;
+    transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+    text-align: left;
+    display: flex; flex-direction: column; gap: 14px;
+    color: inherit;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: var(--brand);
+    box-shadow: 0 10px 30px -12px var(--brand-soft);
+  }
+  .card.selected {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 2px var(--brand-soft) inset;
+  }
+  .card .badge {
+    display: inline-flex; align-items: center;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--brand); font-weight: 600;
+  }
+  .card h2 { margin: 0; font-size: 22px; font-weight: 600; }
+  .card p  { margin: 0; color: #8891b0; font-size: 14px; line-height: 1.5; }
+  .card .dot {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: var(--brand-soft); color: var(--brand);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 18px;
+  }
+
+  .card.educacao { --brand: #4f8ef7; --brand-soft: rgba(79,142,247,0.16); }
+  .card.gov      { --brand: #2dca72; --brand-soft: rgba(45,202,114,0.16); }
+
+  .actions {
+    margin-top: 28px; display: none; gap: 12px; flex-wrap: wrap;
+    justify-content: center; width: 100%; max-width: 740px;
+  }
+  .actions.visible { display: flex; }
+  .actions .info {
+    width: 100%; text-align: center; color: #8891b0; font-size: 14px;
+    margin-bottom: 4px;
+  }
+  .actions .info strong { color: #e2e8f0; }
+  .btn {
+    appearance: none; border: 1px solid #2a2f45; background: #1e2130; color: #e2e8f0;
+    padding: 12px 22px; border-radius: 10px; font: inherit; font-weight: 500;
+    cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  .btn:hover { background: #262a3d; border-color: #353b55; }
+  .btn.primary { background: #4f8ef7; border-color: #4f8ef7; color: #0f1117; }
+  .btn.primary:hover { background: #6ba1f9; border-color: #6ba1f9; }
+  .btn.link {
+    background: transparent; border: none; color: #8891b0; padding: 8px 12px;
+  }
+  .btn.link:hover { color: #e2e8f0; background: transparent; }
+
+  footer.foot {
+    margin-top: 48px; color: #5b6480; font-size: 12px; text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <h1>Canaledu</h1>
+      <p>Selecione a emissora para começar</p>
+    </header>
+
+    <div class="cards" role="list">
+      <button class="card educacao" role="listitem" data-id="educacao" type="button">
+        <div class="dot">CE</div>
+        <span class="badge">Educação</span>
+        <h2>Canal Educação</h2>
+        <p>Roteiro e banco de peças/programas do Canal Educação.</p>
+      </button>
+      <button class="card gov" role="listitem" data-id="gov" type="button">
+        <div class="dot">GV</div>
+        <span class="badge">Governo</span>
+        <h2>Canal GOV</h2>
+        <p>Roteiro e banco de peças/programas independente do Canal Educação.</p>
+      </button>
+    </div>
+
+    <div class="actions" id="actions" aria-live="polite">
+      <div class="info">Emissora selecionada: <strong id="labelEmissora"></strong></div>
+      <a class="btn primary" id="btnRoteiro"  href="index.html">Abrir Roteiro</a>
+      <a class="btn"         id="btnPecas"    href="pecas-programas.html">Peças e Programas</a>
+      <button class="btn link" type="button" id="btnTrocar">Trocar emissora</button>
+    </div>
+
+    <footer class="foot">
+      <span id="versao"></span>
+    </footer>
+  </div>
+
+<script>
+(function () {
+  var actions = document.getElementById('actions');
+  var labelEl = document.getElementById('labelEmissora');
+  var cards   = document.querySelectorAll('.card');
+
+  function refresh() {
+    var atual = window.Emissora.get();
+    cards.forEach(function (c) {
+      c.classList.toggle('selected', c.dataset.id === atual);
+    });
+    if (atual) {
+      labelEl.textContent = window.Emissora.label();
+      actions.classList.add('visible');
+    } else {
+      actions.classList.remove('visible');
+    }
+  }
+
+  cards.forEach(function (c) {
+    c.addEventListener('click', function () {
+      window.Emissora.set(c.dataset.id);
+      refresh();
+    });
+  });
+
+  document.getElementById('btnTrocar').addEventListener('click', function () {
+    window.Emissora.clear();
+    refresh();
+  });
+
+  // Versão no rodapé (se version.js expor).
+  try {
+    var v = (window.APP_VERSION || window.VERSION || '');
+    if (v) document.getElementById('versao').textContent = 'v' + v;
+  } catch (_) {}
+
+  refresh();
+})();
+</script>
+</body>
+</html>
