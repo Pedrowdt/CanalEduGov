@@ -19,3 +19,14 @@ Este arquivo é atualizado automaticamente por `npm run release` — não edite 
 ### Notas de migração
 - Usuários com regras customizadas mantêm suas configurações. Para cobrir madrugada, ajuste manualmente `fim` para `05:59` no painel Admin.
 
+
+## [2.1.1] - 2026-07-20
+
+### Fixed
+- **parts-store.js**: chave `roteiroApp` agora é namespaced por emissora (`roteiroApp__educacao` / `roteiroApp__gov`), evitando que peças do Canal Educação apareçam no Canal Gov e vice-versa.
+- **cloud-sync.js**: `patchLocalStorage`, `pushToCloud` e o handler realtime passam pela `chaveStorageCloudSync()` — antes ainda liam/gravavam `roteiroApp`/`roteiroRegras` puros, cruzando dados entre emissoras.
+- **cloud-sync.js**: `setupRealtime` filtra por `workspaceIdAtual()` (era `WORKSPACE_ID` fixo).
+
+### Added
+- **emissora.js**: novos helpers `Emissora.raw()` (null quando não escolhida), `Emissora.label()` e `Emissora.clear()`.
+- **cloud-sync.js**: bypass `?local=1` — pula login/hub e roda 100% local, útil para testes offline/dev.

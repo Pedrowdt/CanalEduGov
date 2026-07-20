@@ -78,5 +78,25 @@
       var alvo = normalizar(nome || atual);
       return alvo === 'gov' ? 'Canal Gov' : 'Canal Educação';
     }
+    ,
+    /** [MOD v2.1.1] valor bruto do localStorage — null se nunca foi
+     *  escolhida. get() continua devolvendo 'educacao' como fallback
+     *  para não quebrar quem já dependia disso. */
+    raw: function () {
+      try { return window.localStorage.getItem(CHAVE); } catch (_) { return null; }
+    },
+    /** [MOD v2.1.1] rótulo pronto pra UI. */
+    label: function (nome) {
+      return this.nomeExibicao(nome);
+    },
+    /** [MOD v2.1.1] limpa a seleção — útil pra voltar à home. */
+    clear: function (opts) {
+      atual = 'educacao';
+      try { window.localStorage.removeItem(CHAVE); } catch (_) { /* silencioso */ }
+      var semReload = opts && opts.semReload;
+      if (!semReload && typeof window.location !== 'undefined' && window.location.reload) {
+        window.location.reload();
+      }
+    }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

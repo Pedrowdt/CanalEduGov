@@ -265,7 +265,11 @@ async function fetchAndMergeCloudData(user) {
 function patchLocalStorage() {
   localStorage.setItem = function (key, value) {
     _origSetItem.call(localStorage, key, value);
-    if (key === 'roteiroApp' || key === 'roteiroRegras') {
+    // [MOD v2.1.1] aciona push só para a emissora ATIVA — evita replicar
+    // gravações de outra emissora que por acaso morem no mesmo localStorage.
+    const alvoApp    = chaveStorageCloudSync('roteiroApp');
+    const alvoRegras = chaveStorageCloudSync('roteiroRegras');
+    if (key === alvoApp || key === alvoRegras) {
       clearTimeout(_pushTimer);
       _pushTimer = setTimeout(pushToCloud, 900);
     }
@@ -274,8 +278,9 @@ function patchLocalStorage() {
 
 async function pushToCloud() {
   if (!currentUser) return;
-  const app    = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
-  const regras = JSON.parse(localStorage.getItem('roteiroRegras') || '{}');
+  // [MOD v2.1.1] lê da emissora ativa
+  const app    = JSON.parse(localStorage.getItem(chaveStorageCloudSync('roteiroApp')) || '{}');
+  const regras = JSON.parse(localStorage.getItem(chaveStorageCloudSync('roteiroRegras')) || '{}');
 
   setSyncStatus('Sincronizando...');
   try {
@@ -292,7 +297,7 @@ async function pushToCloud() {
         updated_by: currentUser.id,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', WORKSPACE_ID);
+      .eq('id', workspaceIdAtual());
 
     await supabaseClient
       .from('user_data')
@@ -319,19 +324,19 @@ function setupRealtime() {
     .channel('shared_data_changes')
     .on(
       'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'shared_data', filter: `id=eq.${WORKSPACE_ID}` },
+      { event: 'UPDATE', schema: 'public', table: 'shared_data', filter: `id=eq.${workspaceIdAtual()}` },
       (payload) => {
         if (!payload.new || payload.new.updated_by === currentUser.id) return; // ignora a própria escrita
 
-        const app = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+        const app = JSON.parse(localStorage.getItem(chaveStorageCloudSync('roteiroApp')) || '{}');
         app.pecas           = payload.new.pecas || [];
         app.programas       = payload.new.programas || [];
         app.grade           = payload.new.grade || {};
         app.gradeByDay      = payload.new.grade_by_day || {};
         app.gradeOrder      = payload.new.grade_order || {};
         app.gradeOrderByDay = payload.new.grade_order_by_day || {};
-        _origSetItem.call(localStorage, 'roteiroApp', JSON.stringify(app));
-        _origSetItem.call(localStorage, 'roteiroRegras', JSON.stringify(payload.new.regras || {}));
+        _origSetItem.call(localStorage, chaveStorageCloudSync('roteiroApp'), JSON.stringify(app));
+        _origSetItem.call(localStorage, chaveStorageCloudSync('roteiroRegras'), JSON.stringify(payload.new.regras || {}));
 
         if (typeof state !== 'undefined') {
           state.pecas     = app.pecas;
@@ -397,6 +402,29 @@ function cloudSyncOpenPecasProgramas() {
 
 (function boot() {
   _origSetItem = localStorage.setItem.bind(localStorage);
+
+  // [MOD v2.1.1] bypass local: `?local=1` na URL pula login/hub e carrega o
+  // app direto usando apenas o localStorage. Útil para teste offline/dev.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('local') === '1') {
+      const overlay = document.getElementById('login-overlay');
+      if (overlay) overlay.style.display = 'none';
+      const hub = document.getElementById('hub-overlay');
+      if (hub) hub.style.display = 'none';
+      loadScriptsSequentially().then(() => {
+        const appEl = document.querySelector('.app');
+        if (appEl) appEl.style.display = '';
+        const sw = document.getElementById('switch-app-link');
+        if (sw) sw.style.display = 'inline-block';
+        setSyncStatus('Modo local (sem nuvem)');
+      }).catch(err => {
+        console.error(err);
+        setSyncStatus('Erro ao carregar em modo local.');
+      });
+      return;
+    }
+  } catch(_) { /* ignora */ }
 
   if (!isSupabaseConfigured()) {
     showLoginError('Configuração pendente: preencha SUPABASE_URL e SUPABASE_ANON_KEY em cloud-sync.js (veja DEPLOY.md).');

@@ -13,7 +13,11 @@
 (function (global) {
   'use strict';
 
-  const LS_KEY = 'roteiroApp';
+  // [MOD v2.1.1] namespace por emissora — evita cruzamento Educação/Gov
+  function _emissora(){ try { return (window.Emissora && window.Emissora.get && window.Emissora.get()) || 'educacao'; } catch(_) { return 'educacao'; } }
+  function _lsKey(){ return 'roteiroApp__' + _emissora(); }
+  Object.defineProperty(this, 'LS_KEY', { get: _lsKey });
+  const LS_KEY_LEGACY = 'roteiroApp';
   const subs = new Set();
 
   function notify(evt) {
@@ -21,7 +25,7 @@
   }
 
   function readLS() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); }
+    try { return JSON.parse(localStorage.getItem(_lsKey()) || '{}'); }
     catch { return {}; }
   }
 
@@ -33,7 +37,7 @@
       const saved = readLS();
       saved.pecas     = global.state?.pecas     ?? saved.pecas;
       saved.programas = global.state?.programas ?? saved.programas;
-      localStorage.setItem(LS_KEY, JSON.stringify(saved));
+      localStorage.setItem(_lsKey(), JSON.stringify(saved));
     }
   }
 
@@ -143,7 +147,7 @@
         const saved = readLS();
         if (!saved.pecasDia) saved.pecasDia = {};
         saved.pecasDia[dateKey] = items.slice();
-        localStorage.setItem(LS_KEY, JSON.stringify(saved));
+        localStorage.setItem(_lsKey(), JSON.stringify(saved));
         if (global.state) global.state.pecasDia = items.slice();
         notify({ type: 'pecasDia.set', dateKey, count: items.length });
         rerender();
@@ -152,7 +156,7 @@
         const saved = readLS();
         if (saved.pecasDia && saved.pecasDia[dateKey]) {
           delete saved.pecasDia[dateKey];
-          localStorage.setItem(LS_KEY, JSON.stringify(saved));
+          localStorage.setItem(_lsKey(), JSON.stringify(saved));
         }
         notify({ type: 'pecasDia.clear', dateKey });
         rerender();
