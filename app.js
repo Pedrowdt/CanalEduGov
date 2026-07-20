@@ -1,4 +1,104 @@
 // =====================================================
+// [MOD canal-gov] SUPORTE MULTI-EMISSORA (Canal Educação + Canal Gov)
+// =====================================================
+// Este bloco foi adicionado para permitir que o Canal Gov use os mesmos
+// mecanismos de roteiro do Canal Educação, com types próprios e SEM
+// misturar peças/programas/roteiro entre as duas emissoras (regra_1).
+//
+// Depende de `emissora.js` (novo arquivo desta entrega, deve ser carregado
+// ANTES de app.js em index.html) — que expõe `window.Emissora.get()`
+// retornando 'educacao' (padrão) ou 'gov'.
+
+/**
+ * Tabela de equivalência de types entre o Canal Educação e o Canal Gov.
+ * Sempre que existir equivalência direta, o type do Gov reaproveita o
+ * MESMO comportamento do type da Educação (janela, adjacência, intervalo
+ * mínimo) — só muda o prefixo do código e a emissora dona do type.
+ *   RPRO → GPRO   (Programas)
+ *   ECHE → GCHE   (Chamadas)
+ *   ECHM → GCHM   (Chamadas de manutenção)
+ *   EVNH → GVNH   (Vinhetas)
+ *   EINT → GINT   (Interprogramas)
+ * Types SEM equivalente na Educação — criados do zero para o Gov:
+ *   GGV  (Governamentais)
+ *   GINS (Institucionais)
+ *   GPIL (Pílulas)
+ */
+const MAPA_EQUIVALENCIA_TIPOS_EDU_GOV = {
+  RPRO: 'GPRO',
+  ECHE: 'GCHE',
+  ECHM: 'GCHM',
+  EVNH: 'GVNH',
+  EINT: 'GINT',
+};
+const TIPOS_EXCLUSIVOS_GOV = ['GGV', 'GINS', 'GPIL'];
+const TIPOS_GOV_EQUIVALENTES = Object.values(MAPA_EQUIVALENCIA_TIPOS_EDU_GOV);
+const TIPOS_GOV = [...TIPOS_GOV_EQUIVALENTES, ...TIPOS_EXCLUSIVOS_GOV];
+
+/** Retorna a emissora atualmente selecionada ('educacao' | 'gov'). Fallback seguro para 'educacao' se `emissora.js` não estiver carregado. */
+function emissoraAtual() {
+  return (typeof window !== 'undefined' && window.Emissora && window.Emissora.get)
+    ? window.Emissora.get()
+    : 'educacao';
+}
+
+/** true quando a emissora ativa é o Canal Gov. */
+function isEmissoraGov() {
+  return emissoraAtual() === 'gov';
+}
+
+/**
+ * true se o código de type representa um PROGRAMA — RPRO (Educação) ou
+ * GPRO (Gov). Substitui as antigas comparações `item.type === 'RPRO'`
+ * espalhadas pelo arquivo, para que o Canal Gov tenha o mesmo tratamento
+ * de "isProgram" que o Canal Educação sempre teve.
+ */
+function isTipoPrograma(tipo) {
+  return tipo === 'RPRO' || tipo === 'GPRO';
+}
+
+/** Type padrão de "programa" para a emissora atual (usado ao criar programas novos). */
+function tipoProgramaAtual() {
+  return isEmissoraGov() ? 'GPRO' : 'RPRO';
+}
+
+/** Type padrão de "chamada de manutenção" para a emissora atual (usado nos modais de cadastro). */
+function tipoChamadaManutAtual() {
+  return isEmissoraGov() ? 'GCHM' : 'ECHM';
+}
+
+/** Type padrão de "vinheta" para a emissora atual (usado nos modais/import de peça avulsa). */
+function tipoVinhetaAtual() {
+  return isEmissoraGov() ? 'GVNH' : 'EVNH';
+}
+
+/**
+ * Nome de exibição da emissora atual, usado em títulos e nomes de arquivo
+ * de exportação (CSV/XLSX/PDF). Antes esses textos vinham hardcoded como
+ * "CANAL EDUCAÇÃO" mesmo quando a emissora ativa era o Gov.
+ */
+function nomeEmissoraAtual() {
+  return isEmissoraGov() ? 'CANAL GOV' : 'CANAL EDUCAÇÃO';
+}
+/** Mesmo nome, mas em formato de slug para nome de arquivo (sem espaço, acentuado como no original). */
+function slugEmissoraAtual() {
+  return isEmissoraGov() ? 'CANAL_GOV' : 'CANAL_EDUCAÇÃO';
+}
+
+/**
+ * Prefixa as chaves de localStorage com a emissora atual, para que o
+ * banco de peças/programas/roteiro e as regras de negócio de uma emissora
+ * NUNCA fiquem visíveis nem sejam compartilhados com a outra (regra_1).
+ * Ex.: 'roteiroApp' → 'roteiroApp__educacao' ou 'roteiroApp__gov'.
+ */
+function chaveStorage(nomeBase) {
+  return `${nomeBase}__${emissoraAtual()}`;
+}
+// =====================================================
+// [/MOD canal-gov]
+// =====================================================
+
+// =====================================================
 // STATE
 // =====================================================
 let state = {
@@ -48,7 +148,9 @@ const REGRAS_DEFAULT = {
   // Quantidade de slots de break por bloco de programa
   breakSlotsPorBloco:  2,
   // Tipos considerados "chamada" para regra de não-adjacência
-  tiposChamada:        ['ECHM', 'ECHE'],
+  // [MOD canal-gov] estendido com os equivalentes do Gov (GCHM/GCHE) —
+  // ver MAPA_EQUIVALENCIA_TIPOS_EDU_GOV no topo do arquivo.
+  tiposChamada:        ['ECHM', 'ECHE', 'GCHM', 'GCHE'],
   // Limite de itens visíveis na sidebar antes de pedir refinamento
   sidebarMaxItens:     120,
   // Intervalo de auto-backup em minutos
@@ -74,6 +176,24 @@ const REGRAS_DEFAULT = {
     RCOM: { ativo: true, inicio: '06:00', fim: '23:00', intervaloMinMin: 30, naoAdjacenteA: [] },
     RPOL: { ativo: true, inicio: '19:30', fim: '22:30', intervaloMinMin: 0,  naoAdjacenteA: [] },
     EVNH: { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: [] },
+
+    // ── [MOD canal-gov] Types do Canal Gov ──────────────────────────
+    // Equivalentes diretos: herdam EXATAMENTE a mesma regra do type
+    // correspondente da Educação (mesma janela/intervalo/adjacência),
+    // só trocando o código na lista naoAdjacenteA.
+    //   ECHM → GCHM · ECHE → GCHE · EINT → GINT · EVNH → GVNH
+    GCHM: { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: ['GCHM','GCHE'] },
+    GCHE: { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: ['GCHM','GCHE'] },
+    GINT: { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: [] },
+    GVNH: { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: [] },
+    // Types NOVOS, sem equivalente no Canal Educação — regras padrão
+    // (janela ampla, sem intervalo mínimo). GGV e GINS não ficam
+    // adjacentes entre si, pela mesma lógica de "conteúdo institucional
+    // não deve se repetir em sequência" usada em ECHM/ECHE. Ajustar aqui
+    // se a área de programação do Gov definir regras específicas.
+    GGV:  { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: ['GGV','GINS'] },
+    GINS: { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: ['GGV','GINS'] },
+    GPIL: { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0,  naoAdjacenteA: [] },
   },
 
 
@@ -129,7 +249,7 @@ const REGRAS_DEFAULT = {
  * com fallback para REGRAS_DEFAULT. Garante que novos campos sempre existem.
  */
 function loadRegras() {
-  const saved = JSON.parse(localStorage.getItem('roteiroRegras') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroRegras')) || '{}');
   return { ...REGRAS_DEFAULT, ...saved };
 }
 
@@ -138,7 +258,7 @@ function loadRegras() {
  * Só armazena os campos que diferem dos defaults.
  */
 function saveRegras(regras) {
-  localStorage.setItem('roteiroRegras', JSON.stringify(regras));
+  localStorage.setItem(chaveStorage('roteiroRegras'), JSON.stringify(regras));
 }
 
 // Regras ativas — carregadas uma vez no boot, recarregadas após Admin salvar
@@ -195,31 +315,50 @@ function getWeekDates(offset) {
 /** Ponto de entrada do app. Inicializa o estado com dados do localStorage (ou dados iniciais), carrega o roteiro do dia atual e renderiza a interface. Se o objeto API estiver disponível (modo servidor), sincroniza os dados em paralelo. */
 function init() {
   loadTheme();
+  sincronizarUIEmissora(); // [MOD canal-gov]
   const today = nowForGrade();
   today.setHours(0,0,0,0);
   state.currentDate = today;
   state.weekOffset  = 0;
 
 
-  const saved = localStorage.getItem('roteiroApp');
+  // ═══ [MOD canal-gov] Multi-emissora: o catálogo semente da Educação
+  // (INITIAL_PECAS/PROGRAMAS/ROTEIRO_QUI, de data.js) é exclusivo da
+  // Educação — o Gov usa seu PRÓPRIO catálogo semente (INITIAL_PECAS_GOV/
+  // INITIAL_PROGRAMAS_GOV, também definido em data.js), nunca o da
+  // Educação (regra_1). A isolação principal já vem da chave de storage
+  // por emissora (`chaveStorage()`, definida no topo do arquivo — cada
+  // emissora lê/grava seu próprio 'roteiroApp__<emissora>'); este bloco é
+  // a segunda camada de defesa contra o Gov herdar dado da Educação num
+  // primeiro carregamento (localStorage vazio). ═══
+  const _isGov = isEmissoraGov();
+  const _seedPecas     = _isGov ? (typeof INITIAL_PECAS_GOV     !== 'undefined' ? INITIAL_PECAS_GOV     : []) : INITIAL_PECAS;
+  const _seedProgramas = _isGov ? (typeof INITIAL_PROGRAMAS_GOV !== 'undefined' ? INITIAL_PROGRAMAS_GOV : []) : INITIAL_PROGRAMAS;
+  // ═══ [/MOD] ═══
+
+  const saved = localStorage.getItem(chaveStorage('roteiroApp'));
   if (saved) {
     const parsed = JSON.parse(saved);
-    state.pecas      = parsed.pecas      || INITIAL_PECAS;
-    state.programas  = parsed.programas  || INITIAL_PROGRAMAS;
+    state.pecas      = parsed.pecas      || _seedPecas;
+    state.programas  = parsed.programas  || _seedProgramas;
     state.pecasFixas = parsed.pecasFixas || [];
     state.roteiro    = parsed.roteiros?.[dateKey(today)] || [];
   } else {
-    state.pecas      = INITIAL_PECAS;
-    state.programas  = INITIAL_PROGRAMAS;
+    state.pecas      = _seedPecas;
+    state.programas  = _seedProgramas;
     state.pecasFixas = [];
-    // Seed Thursday 19/03/2026 roteiro from imported data
-    const seed = { pecas: state.pecas, programas: state.programas,
-                   roteiros: { '2026-03-19': INITIAL_ROTEIRO_QUI } };
-    localStorage.setItem('roteiroApp', JSON.stringify(seed));
+    // ═══ [MOD] O roteiro semente (INITIAL_ROTEIRO_QUI, 19/03/2026) também é
+    // conteúdo do Canal Educação — não injeta pro GOV. ═══
+    const seed = _isGov
+      ? { pecas: state.pecas, programas: state.programas, roteiros: {} }
+      : { pecas: state.pecas, programas: state.programas,
+          roteiros: { '2026-03-19': INITIAL_ROTEIRO_QUI } };
+    // ═══ [/MOD] ═══
+    localStorage.setItem(chaveStorage('roteiroApp'), JSON.stringify(seed));
     state.roteiro = [];
   }
   // Load pecasDia for today
-  const savedPD = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const savedPD = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   state.pecasDia = savedPD.pecasDia?.[dateKey(today)] || [];
   renderWeekSelector();
   updateDateDisplay();
@@ -229,12 +368,12 @@ function init() {
 /** Persiste o estado atual no localStorage: roteiro do dia, banco de peças e programas. Se o objeto API estiver disponível, também envia os dados ao servidor via HTTP PUT. Aciona o auto-backup silencioso se estiver configurado. */
 /** Persiste o estado atual no localStorage: roteiro do dia, banco de peças e programas. Se o objeto API estiver disponível, também envia os dados ao servidor via HTTP PUT. Aciona o auto-backup silencioso se estiver configurado. */
 function saveState() {
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   if (!saved.roteiros) saved.roteiros = {};
   saved.roteiros[dateKey(state.currentDate)] = state.roteiro;
   saved.pecas     = state.pecas;
   saved.programas = state.programas;
-  localStorage.setItem('roteiroApp', JSON.stringify(saved));
+  localStorage.setItem(chaveStorage('roteiroApp'), JSON.stringify(saved));
   // Aciona backup automático silenciosamente se pasta estiver configurada
   if (typeof runAutoBackup === 'function' && _backupDirHandle) {
     runAutoBackup();
@@ -310,7 +449,7 @@ function renderWeekSelector() {
   const dates   = getWeekDates(state.weekOffset);
   const todayKey = dateKey(nowForGrade());
   const curKey   = dateKey(state.currentDate);
-  const saved    = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved    = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
 
   // Week label (e.g. "17/03 – 23/03/2026")
   const first = dates[0], last = dates[6];
@@ -347,7 +486,7 @@ function changeWeek(delta) {
   d.setDate(d.getDate() + delta * 7);
   state.currentDate = d;
   // Load roteiro for the new date
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   state.roteiro = saved.roteiros?.[dateKey(d)] || [];
   renderWeekSelector();
   updateDateDisplay();
@@ -370,7 +509,7 @@ function selectDate(key) {
   const diffMs = mondayNew - mondayToday;
   state.weekOffset = Math.round(diffMs / (7 * 86400000));
   // Load roteiro and pecasDia
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   state.roteiro = saved.roteiros?.[key] || [];
   state.pecasDia = saved.pecasDia?.[key] || [];
   renderWeekSelector();
@@ -453,7 +592,7 @@ function renderRoteiro() {
   }
 
   tbody.innerHTML = state.roteiro.map((item, i) => {
-    const isProgram  = item.type === 'RPRO';
+    const isProgram  = isTipoPrograma(item.type);
     const isSlot     = item.type === '__SLOT__';
 
     // Aviso de início no PRIMEIRO BLOCO de cada programa (inclui programas
@@ -473,7 +612,7 @@ function renderRoteiro() {
       // Avança o contador de ocorrência sempre que troca de programa
       // contíguo — é também a definição de "primeiro bloco" do programa.
       const prevItem = i > 0 ? state.roteiro[i - 1] : null;
-      const prevBase = prevItem && prevItem.type === 'RPRO' ? _norm(baseProgramTitle(prevItem.descricao)) : null;
+      const prevBase = prevItem && isTipoPrograma(prevItem.type) ? _norm(baseProgramTitle(prevItem.descricao)) : null;
       const isFirstBlock = (prevBase !== normBase);
       if (isFirstBlock) {
         renderRoteiro._occ[normBase] = n + 1;
@@ -602,18 +741,40 @@ function renderRoteiroFiltered() {
   });
 }
 
-/** Atualiza a barra de estatísticas com contadores clicáveis por tipo (PGM, ECHM, ECHE, EINT, RCOM, RPOL, EVNH). Clicar num tipo ativa o filtro visual correspondente. */
+// [MOD canal-gov] configuração de badges por emissora — cada emissora só
+// vê os badges dos SEUS types (regra_1). PGM é tratado à parte porque usa
+// isTipoPrograma() para somar RPRO+GPRO de uma vez, então precisa de type
+// separado por emissora (RPRO na Educação, GPRO no Gov).
+const STAT_BADGES_EDUCACAO = [
+  { type: 'RPRO', label: 'PGM',  title: 'Clique para filtrar programas' },
+  { type: 'ECHM', label: 'ECHM', title: 'Clique para filtrar chamadas manutenção' },
+  { type: 'ECHE', label: 'ECHE', title: 'Clique para filtrar chamadas quentes' },
+  { type: 'EINT', label: 'EINT', title: 'Clique para filtrar interprogramas' },
+  { type: 'RCOM', label: 'RCOM', title: 'Clique para filtrar comerciais' },
+  { type: 'RPOL', label: 'RPOL', title: 'Clique para filtrar políticos' },
+  { type: 'EVNH', label: 'EVNH', title: 'Clique para filtrar vinhetas' },
+];
+const STAT_BADGES_GOV = [
+  { type: 'GPRO', label: 'PGM',  title: 'Clique para filtrar programas' },
+  { type: 'GCHM', label: 'GCHM', title: 'Clique para filtrar chamadas manutenção' },
+  { type: 'GCHE', label: 'GCHE', title: 'Clique para filtrar chamadas' },
+  { type: 'GINT', label: 'GINT', title: 'Clique para filtrar interprogramas' },
+  { type: 'GVNH', label: 'GVNH', title: 'Clique para filtrar vinhetas' },
+  { type: 'GGV',  label: 'GGV',  title: 'Clique para filtrar governamentais' },
+  { type: 'GINS', label: 'GINS', title: 'Clique para filtrar institucionais' },
+  { type: 'GPIL', label: 'GPIL', title: 'Clique para filtrar pílulas' },
+];
+
+/** Atualiza a barra de estatísticas com contadores clicáveis por tipo. Os badges mudam conforme a emissora ativa (Educação ou Gov) — regra_1. Clicar num tipo ativa o filtro visual correspondente. */
 function renderStats() {
   const counts = {};
   state.roteiro.forEach(item => { counts[item.type] = (counts[item.type]||0)+1; });
+  const badges = isEmissoraGov() ? STAT_BADGES_GOV : STAT_BADGES_EDUCACAO;
+  const badgesHtml = badges.map(b => `
+    <span class="stat-badge${_statFilter===b.type?' stat-badge-active':''}" data-type="${b.type}" onclick="toggleStatFilter('${b.type}')" title="${b.title}">${b.label} <strong>${counts[b.type]||0}</strong></span>`
+  ).join('');
   document.getElementById('stat-row').innerHTML = `
-    <span class="stat-badge${_statFilter==='RPRO'?' stat-badge-active':''}" data-type="RPRO" onclick="toggleStatFilter('RPRO')" title="Clique para filtrar programas">PGM <strong>${counts['RPRO']||0}</strong></span>
-    <span class="stat-badge${_statFilter==='ECHM'?' stat-badge-active':''}" data-type="ECHM" onclick="toggleStatFilter('ECHM')" title="Clique para filtrar chamadas manutenção">ECHM <strong>${counts['ECHM']||0}</strong></span>
-    <span class="stat-badge${_statFilter==='ECHE'?' stat-badge-active':''}" data-type="ECHE" onclick="toggleStatFilter('ECHE')" title="Clique para filtrar chamadas quentes">ECHE <strong>${counts['ECHE']||0}</strong></span>
-    <span class="stat-badge${_statFilter==='EINT'?' stat-badge-active':''}" data-type="EINT" onclick="toggleStatFilter('EINT')" title="Clique para filtrar interprogramas">EINT <strong>${counts['EINT']||0}</strong></span>
-    <span class="stat-badge${_statFilter==='RCOM'?' stat-badge-active':''}" data-type="RCOM" onclick="toggleStatFilter('RCOM')" title="Clique para filtrar comerciais">RCOM <strong>${counts['RCOM']||0}</strong></span>
-    <span class="stat-badge${_statFilter==='RPOL'?' stat-badge-active':''}" data-type="RPOL" onclick="toggleStatFilter('RPOL')" title="Clique para filtrar políticos">RPOL <strong>${counts['RPOL']||0}</strong></span>
-    <span class="stat-badge${_statFilter==='EVNH'?' stat-badge-active':''}" data-type="EVNH" onclick="toggleStatFilter('EVNH')" title="Clique para filtrar vinhetas">EVNH <strong>${counts['EVNH']||0}</strong></span>
+    ${badgesHtml}
     <span style="margin-left:auto;font-size:11px;color:var(--muted)">${state.roteiro.length} itens · ${secToTime(totalDuration())}</span>
     ${_statFilter ? `<span class="stat-badge stat-clear" onclick="toggleStatFilter(null)">✕ limpar filtro</span>` : ''}
   `;
@@ -636,8 +797,11 @@ function toggleFilter(type) {
 function renderPecasSidebar() {
   const search   = document.getElementById('pecas-search-input').value.toLowerCase();
   const durMax   = document.getElementById('sidebar-dur-filter')?.value || '';
+  // [MOD canal-gov] antes forçava type:'RPRO' sempre, o que quebrava
+  // programas do Gov (GPRO) ao listá-los na sidebar. Agora preserva o
+  // type real do programa e só cai para 'RPRO' se estiver ausente.
   const allItems = [...state.pecas,
-    ...state.programas.map(p => ({...p, type:'RPRO', categoria:'PROGRAMAS'}))];
+    ...state.programas.map(p => ({...p, type: p.type || 'RPRO', categoria:'PROGRAMAS'}))];
   const today = new Date();
 
   const filtered = allItems.filter(item => {
@@ -909,7 +1073,7 @@ function injectBreakSummaries() {
 
   for (let i = 0; i < state.roteiro.length; i++) {
     const item = state.roteiro[i];
-    const isProg = item.type === 'RPRO';
+    const isProg = isTipoPrograma(item.type);
 
     if (isProg && inBreak) {
       // End of break — compute total
@@ -920,7 +1084,8 @@ function injectBreakSummaries() {
       breakSec = 0;
     }
 
-    if (!isProg && i > 0 && state.roteiro[i-1].type === 'RPRO') {
+    // [MOD canal-gov] usa isTipoPrograma() (RPRO ou GPRO) em vez de comparar só com 'RPRO'
+    if (!isProg && i > 0 && isTipoPrograma(state.roteiro[i-1].type)) {
       // Start of a break after a program block
       inBreak    = true;
       breakStart = i;
@@ -979,7 +1144,7 @@ function editItemModal(idx) {
   document.getElementById('ei-code').value  = item.code || '';
   document.getElementById('ei-desc').value  = item.descricao || '';
   document.getElementById('ei-dur').value   = item.tempo || '00:01:00';
-  document.getElementById('ei-type').value  = item.type || 'EVNH';
+  document.getElementById('ei-type').value  = item.type || tipoVinhetaAtual(); // [MOD canal-gov] default sensível à emissora
   document.getElementById('ei-midia').value = item.midia || '0OMN';
   document.getElementById('modal-edit-item').style.display = 'flex';
 }
@@ -1003,8 +1168,10 @@ function saveEditItem() {
 
 /** Abre o modal de busca e inserção de peças. Monta a lista completa de peças e programas e atualiza o título com a posição de inserção atual (linha selecionada). */
 function addItemModal() {
+  // [MOD canal-gov] mesma correção de renderPecasSidebar: preserva o type
+  // real do programa (RPRO ou GPRO) em vez de sobrescrever sempre para 'RPRO'.
   modalAll = [...state.pecas,
-    ...state.programas.map(p => ({...p, type:'RPRO', categoria:'PROGRAMAS'}))];
+    ...state.programas.map(p => ({...p, type: p.type || 'RPRO', categoria:'PROGRAMAS'}))];
   filterModalList();
   const title = document.getElementById('modal-add-title');
   if (title) {
@@ -1061,7 +1228,7 @@ function closeModal(id) {
 function addPecaModal() {
   ['np-code','np-desc','np-dur','np-val','np-obs'].forEach(id =>
     document.getElementById(id).value = '');
-  document.getElementById('np-type').value = 'ECHM';
+  document.getElementById('np-type').value = tipoChamadaManutAtual(); // [MOD canal-gov] default sensível à emissora
   document.getElementById('modal-new-peca').style.display = 'flex';
 }
 
@@ -1093,7 +1260,7 @@ function editPecaModal(idx) {
   document.getElementById('ep-code').value = item.code || '';
   document.getElementById('ep-desc').value = item.descricao || '';
   document.getElementById('ep-dur').value  = item.tempo || '00:01:00';
-  document.getElementById('ep-type').value = item.type || 'ECHM';
+  document.getElementById('ep-type').value = item.type || tipoChamadaManutAtual(); // [MOD canal-gov] default sensível à emissora
   document.getElementById('ep-val').value  = item.validade || '';
   document.getElementById('ep-obs').value  = item.obs || '';
   document.getElementById('modal-edit-peca').style.display = 'flex';
@@ -1219,7 +1386,10 @@ function importBanco(e) {
           if (!/^\d{2}:\d{2}:\d{2}$/.test(tempo)) tempo = '00:01:00';
           state.pecas.push({
             code, descricao: sanitizeText(desc), tempo, midia: '0OMN',
-            type:     ci.type >= 0 ? String(r[ci.type]||'EVNH').trim() : 'EVNH',
+            // [MOD canal-gov] fallback sensível à emissora: se a planilha não
+            // trouxer coluna de type, usa a vinheta padrão da emissora atual
+            // (EVNH na Educação, GVNH no Gov) em vez de sempre 'EVNH'.
+            type:     ci.type >= 0 ? String(r[ci.type]||tipoVinhetaAtual()).trim() : tipoVinhetaAtual(),
             validade: ci.val  >= 0 ? String(r[ci.val] ||'').trim()     : '',
             obs:      sanitizeText(ci.obs  >= 0 ? String(r[ci.obs] ||'').trim() : ''),
             categoria: 'IMPORTADO',
@@ -1308,7 +1478,7 @@ function saveNewProg() {
   const desc = document.getElementById('npp-desc').value.trim();
   const dur  = document.getElementById('npp-dur').value.trim() || '00:25:00';
   if (!code || !desc) { toast('Code e descrição são obrigatórios', 'error'); return; }
-  state.programas.push({ code, descricao: sanitizeText(desc), tempo: dur, midia: '0OMN', type: 'RPRO' });
+  state.programas.push({ code, descricao: sanitizeText(desc), tempo: dur, midia: '0OMN', type: tipoProgramaAtual() }); // [MOD canal-gov] type sensível à emissora
   saveState();
   renderProgramas();
   document.getElementById('badge-prog').textContent = state.programas.length;
@@ -1375,6 +1545,7 @@ function handleImport(e) {
     const isPecasInserção =
       stripped.startsWith('PEÇAS EM EXIB') ||
       stripped.startsWith('CANAL EDUCAÇ') ||
+      stripped.startsWith('CANAL GOV') || // [MOD canal-gov] reconhece export do próprio Gov
       DIAS.some(d => stripped.startsWith(d));
 
     if (isPecasInserção) {
@@ -1442,10 +1613,13 @@ function mergeBancoFromRoteiro(items) {
   let addedP = 0, addedR = 0;
   items.forEach(item => {
     if (!item.code || item.type === '__SLOT__' || item._fixa) return;
-    if (item.type === 'RPRO') {
+    if (isTipoPrograma(item.type)) {
       if (!existProgs.has(item.code)) {
+        // [MOD canal-gov] preserva item.type (RPRO ou GPRO) em vez de gravar
+        // sempre 'RPRO' — senão um programa importado no Gov virava RPRO
+        // (Educação) ao ser mesclado no banco permanente.
         state.programas.push({ code:item.code, descricao:item.descricao,
-          tempo:item.tempo, midia:item.midia||'0OMN', type:'RPRO',
+          tempo:item.tempo, midia:item.midia||'0OMN', type:item.type || tipoProgramaAtual(),
           validade:'', obs:'', categoria:'AUTO' });
         existProgs.add(item.code); addedR++;
       }
@@ -1683,7 +1857,7 @@ function importNotionCSV(text, sep) {
     const desc  = sanitizeText(unquote(cols[1])?.replace(/\s+/g, ' '));
     const tempo = unquote(cols[2]);
     if (!code || !desc || !tempo) continue;
-    const prog = { code, descricao: desc, tempo, midia: '0OMN', type: 'RPRO' };
+    const prog = { code, descricao: desc, tempo, midia: '0OMN', type: tipoProgramaAtual() }; // [MOD canal-gov] type sensível à emissora
     imported.push(prog);
     // Upsert into programas bank
     const idx = state.programas.findIndex(p => p.code === code);
@@ -1736,7 +1910,7 @@ function importNotionCSV(text, sep) {
     if (fAntesProg.length) {
       const out = [];
       state.roteiro.forEach(item => {
-        if (item.type === 'RPRO') fAntesProg.forEach(f => out.push(makeFixed(f)));
+        if (isTipoPrograma(item.type)) fAntesProg.forEach(f => out.push(makeFixed(f)));
         out.push(item);
       });
       state.roteiro = out;
@@ -1798,7 +1972,7 @@ function exportExcel() {
   const mm   = String(d.getMonth()+1).padStart(2,'0');
   const yyyy = d.getFullYear();
   const dow  = d.getDay();
-  a.download = `CANAL_EDUCAÇÃO_${dd}${mm}${yyyy}_${DAY_NAMES[dow].toUpperCase()}.csv`;
+  a.download = `${slugEmissoraAtual()}_${dd}${mm}${yyyy}_${DAY_NAMES[dow].toUpperCase()}.csv`; // [MOD canal-gov]
   a.click();
   toast(`Roteiro exportado — ${state.roteiro.length} itens`, 'success');
 }
@@ -1826,8 +2000,8 @@ function exportXLSX() {
   const yyyy    = d.getFullYear();
   const dateLabel = `${dd}/${mm}/${yyyy}`;
   const dayName   = DAY_NAMES[dow].toUpperCase();
-  const title     = `ROTEIRO DO CANAL EDUCAÇÃO ${dayName} ${dd}-${mm}-${yyyy}`;
-  const filename  = `CANAL_EDUCAÇÃO_${dd}${mm}${yyyy}_${dayName}.xlsx`;
+  const title     = `ROTEIRO DO ${nomeEmissoraAtual()} ${dayName} ${dd}-${mm}-${yyyy}`; // [MOD canal-gov]
+  const filename  = `${slugEmissoraAtual()}_${dd}${mm}${yyyy}_${dayName}.xlsx`; // [MOD canal-gov]
 
   const wb    = XLSX.utils.book_new();
   const items = state.roteiro.filter(i => i.type !== '__SLOT__');
@@ -1836,9 +2010,9 @@ function exportXLSX() {
   const seenProg = new Set(), seenCham = new Set();
   const progs = [], chams = [];
   items.forEach(item => {
-    if (item.type === 'RPRO' && !seenProg.has(item.code)) {
+    if (isTipoPrograma(item.type) && !seenProg.has(item.code)) {
       seenProg.add(item.code); progs.push(item);
-    } else if (item.type !== 'RPRO' && !seenCham.has(item.code)) {
+    } else if (!isTipoPrograma(item.type) && !seenCham.has(item.code)) {
       seenCham.add(item.code); chams.push(item);
     }
   });
@@ -1899,7 +2073,7 @@ function exportXLSX() {
   const sDefault= mkRow('FFFFFF');
   const styleForItem = (item) => {
     const desc = String(item.descricao || '').toUpperCase();
-    if (item.type === 'RPRO') return sRPRO;
+    if (isTipoPrograma(item.type)) return sRPRO;
     if (/CLASSIFICA[ÇC]/.test(desc)) return sClass;
     if (/^VH\s+A\s+SEGUIR|^VH\s+DAQUI|^VH\s+VC\s+ESTA/.test(desc)) return sVHseg;
     if (/ASSINATURA/.test(desc)) return sAssin;
@@ -2039,7 +2213,7 @@ function exportPDF() {
   const mm   = String(d.getMonth()+1).padStart(2,'0');
   const yyyy = d.getFullYear();
   const dayName = DAY_NAMES[dow].toUpperCase();
-  const title = `ROTEIRO CANAL EDUCAÇÃO ${dd}/${mm}/${yyyy} ${dayName}`;
+  const title = `ROTEIRO ${nomeEmissoraAtual()} ${dd}/${mm}/${yyyy} ${dayName}`; // [MOD canal-gov]
 
   // A4 retrato, formato do modelo
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -2062,10 +2236,10 @@ function exportPDF() {
   let acc = 0;
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    if (r.type === 'RPRO') { acc = 0; continue; }
+    if (isTipoPrograma(r.type)) { acc = 0; continue; }
     acc += r.dur;
     const next = rows[i+1];
-    if (next && (isClass(next) || next.type === 'RPRO') && !isClass(r)) {
+    if (next && (isClass(next) || isTipoPrograma(next.type)) && !isClass(r)) {
       r.break = secToTime(acc);
       acc = 0;
     }
@@ -2074,13 +2248,13 @@ function exportPDF() {
   // Cor de fundo por tipo/descrição (modelo)
   function rowFill(r) {
     const desc = (r.desc || '').toUpperCase();
-    if (r.type === 'RPRO') return [46, 139, 93];
+    if (isTipoPrograma(r.type)) return [46, 139, 93];
     if (/CLASSIFICA[ÇC]/.test(desc)) return [207, 233, 207];
     if (/^VH\s+A\s+SEGUIR|^VH\s+DAQUI|^VH\s+VC\s+ESTA/.test(desc)) return [207, 224, 240];
     if (/ASSINATURA/.test(desc)) return [245, 217, 168];
     return [255, 255, 255];
   }
-  const rowTextColor = r => r.type === 'RPRO' ? [255,255,255] : [20,24,36];
+  const rowTextColor = r => isTipoPrograma(r.type) ? [255,255,255] : [20,24,36];
 
   const body = rows.map(r => [r.code, r.desc, r.tempo, r.in, r.out, r.break]);
 
@@ -2139,7 +2313,7 @@ function exportPDF() {
     },
   });
 
-  const filename = `CANAL_EDUCAÇÃO_${dd}${mm}${yyyy}_${dayName}.pdf`;
+  const filename = `${slugEmissoraAtual()}_${dd}${mm}${yyyy}_${dayName}.pdf`; // [MOD canal-gov]
   doc.save(filename);
   toast('PDF exportado', 'success');
 }
@@ -2149,7 +2323,7 @@ function exportJSON() {
   const data = {
     pecas: state.pecas,
     programas: state.programas,
-    roteiros: JSON.parse(localStorage.getItem('roteiroApp') || '{}').roteiros || {}
+    roteiros: JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}').roteiros || {}
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a    = document.createElement('a');
@@ -2410,7 +2584,7 @@ function saveAdminRegras() {
  */
 function resetAdminRegras() {
   if (!confirm('Restaurar todas as regras para os valores padrão?')) return;
-  localStorage.removeItem('roteiroRegras');
+  localStorage.removeItem(chaveStorage('roteiroRegras'));
   REGRAS = loadRegras();
   openAdminModal(); // Re-abre com valores default
   toast('Regras restauradas para os valores padrão', 'success');
@@ -2467,7 +2641,7 @@ async function setupAutoBackup() {
 async function runAutoBackup() {
   if (!_backupDirHandle) return;
   try {
-    const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+    const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
     const data  = JSON.stringify({
       ...saved,
       _backup: { gerado: new Date().toISOString(), versao: '2.0' }
@@ -2524,6 +2698,44 @@ function loadTheme() {
     document.addEventListener('DOMContentLoaded', () => setTheme(saved), { once: true });
   } else {
     setTheme(saved);
+  }
+}
+
+// ── [MOD canal-gov] Seletor de emissora (topbar) ────────────────────────────
+/**
+ * Sincroniza toda a UI que depende da emissora ativa:
+ *  - <body data-emissora="..."> — usado pelo CSS para mostrar só os
+ *    botões de filtro (sidebar/painel de peças) da emissora ativa (regra_1);
+ *  - o <select id="emissora-selector"> do topbar;
+ *  - os textos "CANAL EDUCAÇÃO"/"CANAL GOV" no logo do topbar e no título
+ *    do Hub (index.html precisa ter os spans com id="logo-emissora-nome" e
+ *    id="hub-emissora-nome" — ver index.html desta entrega).
+ * Chamada no início de init() e sempre que a emissora mudar.
+ */
+function sincronizarUIEmissora() {
+  const emissora = emissoraAtual();
+  if (document.body) document.body.setAttribute('data-emissora', emissora);
+
+  const sel = document.getElementById('emissora-selector');
+  if (sel && sel.value !== emissora) sel.value = emissora;
+
+  const nomeCurto = isEmissoraGov() ? 'GOV' : 'EDUCAÇÃO';
+  const logoSpan = document.getElementById('logo-emissora-nome');
+  if (logoSpan) logoSpan.textContent = nomeCurto;
+  const hubSpan = document.getElementById('hub-emissora-nome');
+  if (hubSpan) hubSpan.textContent = nomeCurto;
+}
+
+/**
+ * Chamada pelo <select id="emissora-selector"> no topbar (onchange).
+ * Delega para window.Emissora.set(), que persiste a escolha e recarrega a
+ * página — necessário porque `state` inteiro (pecas/programas/roteiro) é
+ * montado uma vez em init(); trocar de emissora sem recarregar deixaria
+ * dado de uma emissora misturado com a tela da outra (regra_1).
+ */
+function trocarEmissora(valor) {
+  if (typeof window !== 'undefined' && window.Emissora && window.Emissora.set) {
+    window.Emissora.set(valor);
   }
 }
 
@@ -2736,10 +2948,10 @@ function fixGradeFromRoteiro() {
   for (const item of state.roteiro) {
     if (item.type === '__SLOT__') { cur += 0; continue; }
     const dur  = timeToSec(item.tempo);
-    if (item.type === 'RPRO') {
+    if (isTipoPrograma(item.type)) {
       const base = baseProgramTitle(item.descricao);
       const prevItem = state.roteiro[state.roteiro.indexOf(item) - 1];
-      const prevBase = prevItem && prevItem.type === 'RPRO' ? baseProgramTitle(prevItem.descricao) : null;
+      const prevBase = prevItem && isTipoPrograma(prevItem.type) ? baseProgramTitle(prevItem.descricao) : null;
       if (prevBase !== base) {
         // New occurrence
         const n    = occ[base] || 0;
@@ -2770,17 +2982,24 @@ function _currentDow() {
 /** Carrega a grade de horários do dia da semana dow. Prioridade: (1) customizações do usuário no localStorage, (2) dados base do GRADE_BASE extraídos do xlsx de programação. */
 function loadGrade(dow) {
   if (dow === undefined) dow = _currentDow();
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   // Migrate legacy flat grade → weekday 4 (Thursday) on first run
   if (saved.grade && !saved.gradeByDay) {
     saved.gradeByDay    = { 4: saved.grade };
     saved.gradeOrderByDay = { 4: saved.gradeOrder || [] };
     delete saved.grade; delete saved.gradeOrder;
-    localStorage.setItem('roteiroApp', JSON.stringify(saved));
+    localStorage.setItem(chaveStorage('roteiroApp'), JSON.stringify(saved));
   }
   const custom = (saved.gradeByDay || {})[dow];
   if (custom && Object.keys(custom).length > 0) return custom;
   // Fallback: Grade Semanal base (admin) — usada como régua mestre
+  // [MOD canal-gov] usa gradeBaseAtual() (grade_base.js) em vez de
+  // GRADE_BASE fixo, para o Gov nunca cair no fallback da grade da
+  // Educação (regra_1). Mantém GRADE_BASE como último fallback de
+  // segurança caso gradeBaseAtual() ainda não tenha sido carregada.
+  if (typeof gradeBaseAtual === 'function') {
+    return gradeBaseAtual().gradeByDay[String(dow)] || {};
+  }
   if (typeof GRADE_BASE !== 'undefined' && GRADE_BASE.gradeByDay) {
     return GRADE_BASE.gradeByDay[String(dow)] || {};
   }
@@ -2790,18 +3009,22 @@ function loadGrade(dow) {
 /** Persiste a grade de horários do dia dow no localStorage. Se o servidor API estiver disponível, sincroniza também via HTTP PUT. */
 function saveGrade(grade, dow) {
   if (dow === undefined) dow = _currentDow();
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   if (!saved.gradeByDay) saved.gradeByDay = {};
   saved.gradeByDay[dow] = grade;
-  localStorage.setItem('roteiroApp', JSON.stringify(saved));
+  localStorage.setItem(chaveStorage('roteiroApp'), JSON.stringify(saved));
 }
 
 /** Retorna a ordem dos programas na grade para o dia dow. Fallback para GRADE_BASE.gradeOrderByDay se não houver customização salva. */
 function loadGradeOrder(dow) {
   if (dow === undefined) dow = _currentDow();
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   const custom = ((saved.gradeOrderByDay || {})[dow]) || [];
   if (custom.length > 0) return custom;
+  // [MOD canal-gov] mesma lógica de fallback por emissora usada em loadGrade().
+  if (typeof gradeBaseAtual === 'function') {
+    return (gradeBaseAtual().gradeOrderByDay[String(dow)] || []).slice();
+  }
   if (typeof GRADE_BASE !== 'undefined' && GRADE_BASE.gradeOrderByDay) {
     return (GRADE_BASE.gradeOrderByDay[String(dow)] || []).slice();
   }
@@ -2811,10 +3034,10 @@ function loadGradeOrder(dow) {
 /** Persiste a ordem dos programas da grade para o dia dow no localStorage. */
 function saveGradeOrder(order, dow) {
   if (dow === undefined) dow = _currentDow();
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   if (!saved.gradeOrderByDay) saved.gradeOrderByDay = {};
   saved.gradeOrderByDay[dow] = order;
-  localStorage.setItem('roteiroApp', JSON.stringify(saved));
+  localStorage.setItem(chaveStorage('roteiroApp'), JSON.stringify(saved));
 }
 
 // Current working order while modal is open (array of names)
@@ -2838,7 +3061,7 @@ function openGradeModal() {
 
   // Add from current roteiro
   state.roteiro.forEach(item => {
-    if (item.type === 'RPRO') {
+    if (isTipoPrograma(item.type)) {
       const base = baseProgramTitle(item.descricao);
       if (!seen.has(base)) { order.push(base); seen.add(base); }
     }
@@ -3057,10 +3280,10 @@ function renderGrade() {
     recalcTimes();
     const occ = {};
     state.roteiro.forEach((item, i) => {
-      if (item.type !== 'RPRO' || !item.IN) return;
+      if (!isTipoPrograma(item.type) || !item.IN) return;
       const base = _norm(baseProgramTitle(item.descricao));
       const prev = state.roteiro[i - 1];
-      const pBase = prev && prev.type === 'RPRO' ? _norm(baseProgramTitle(prev.descricao)) : null;
+      const pBase = prev && isTipoPrograma(prev.type) ? _norm(baseProgramTitle(prev.descricao)) : null;
       if (pBase !== base) {
         const n = occ[base] || 0;
         occ[base] = n + 1;
@@ -3201,7 +3424,18 @@ function renderGrade() {
 // REGRAS POR TIPO — UI no Admin + validação no roteiro
 // =====================================================
 
-const TIPOS_CONFIGURAVEIS = ['ECHM', 'ECHE', 'EINT', 'RCOM', 'RPOL', 'EVNH'];
+// [MOD canal-gov] lista completa (Educação + Gov). Types de uma emissora
+// não devem ficar visíveis nem editáveis na outra (regra_1) — por isso
+// TIPOS_CONFIGURAVEIS agora é uma função que filtra pela emissora ativa,
+// em vez de uma constante fixa. Todo lugar que já usava o array direto
+// passou a chamar tiposConfiguraveisAtual().
+const TIPOS_CONFIGURAVEIS_EDUCACAO = ['ECHM', 'ECHE', 'EINT', 'RCOM', 'RPOL', 'EVNH'];
+const TIPOS_CONFIGURAVEIS_GOV      = ['GCHM', 'GCHE', 'GINT', 'GVNH', 'GGV', 'GINS', 'GPIL'];
+
+/** Types configuráveis no painel Admin para a emissora ATUAL (regra_1: nunca mistura as duas listas). */
+function tiposConfiguraveisAtual() {
+  return isEmissoraGov() ? TIPOS_CONFIGURAVEIS_GOV : TIPOS_CONFIGURAVEIS_EDUCACAO;
+}
 
 /** Converte "HH:MM" em segundos desde meia-noite. */
 function _hhmmToSec(s) {
@@ -3214,9 +3448,12 @@ function renderRegrasTiposUI(regras) {
   const wrap = document.getElementById('adm-regras-tipos');
   if (!wrap) return;
   const rt = regras.regrasTipos || {};
-  wrap.innerHTML = TIPOS_CONFIGURAVEIS.map(tipo => {
+  // [MOD canal-gov] só lista/edita os types da emissora ATIVA (regra_1) —
+  // antes usava a constante fixa TIPOS_CONFIGURAVEIS (só Educação).
+  const tipos = tiposConfiguraveisAtual();
+  wrap.innerHTML = tipos.map(tipo => {
     const r = rt[tipo] || { ativo: true, inicio: '06:00', fim: '23:59', intervaloMinMin: 0, naoAdjacenteA: [] };
-    const adjOpts = TIPOS_CONFIGURAVEIS.filter(t => t !== tipo).map(t => {
+    const adjOpts = tipos.filter(t => t !== tipo).map(t => {
       const sel = (r.naoAdjacenteA || []).includes(t) ? 'selected' : '';
       return `<option value="${t}" ${sel}>${t}</option>`;
     }).join('');
@@ -3295,7 +3532,7 @@ function validateRoteiroRegras() {
   const ocorrPorCode = {};
   for (let i = 0; i < itens.length; i++) {
     const it = itens[i];
-    if (!it || !it.type || it.type === '__SLOT__' || it.type === 'RPRO') continue;
+    if (!it || !it.type || it.type === '__SLOT__' || isTipoPrograma(it.type)) continue;
     const cfg = rt[it.type];
     if (!cfg || !cfg.ativo) continue;
     const sec = it.IN ? timeToSec(it.IN) : null;
@@ -3315,7 +3552,7 @@ function validateRoteiroRegras() {
       let j = i + delta;
       while (j >= 0 && j < itens.length) {
         const v = itens[j];
-        if (v && v.type && v.type !== '__SLOT__' && v.type !== 'RPRO') return v;
+        if (v && v.type && v.type !== '__SLOT__' && !isTipoPrograma(v.type)) return v;
         j += delta;
       }
       return null;
@@ -3755,7 +3992,7 @@ function applyGradeSemanalImport() {
     return;
   }
   const { gradeByDay, gradeOrderByDay } = _gradeImport.parsed;
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  const saved = JSON.parse(localStorage.getItem(chaveStorage('roteiroApp')) || '{}');
   saved.gradeByDay = saved.gradeByDay || {};
   saved.gradeOrderByDay = saved.gradeOrderByDay || {};
   let totalDays = 0, totalProgs = 0;
@@ -3765,7 +4002,7 @@ function applyGradeSemanalImport() {
     totalDays++;
     totalProgs += gradeOrderByDay[dow].length;
   }
-  localStorage.setItem('roteiroApp', JSON.stringify(saved));
+  localStorage.setItem(chaveStorage('roteiroApp'), JSON.stringify(saved));
   toast(`✓ Grade aplicada: ${totalDays} dias, ${totalProgs} programas`, 'success');
   // Re-renderizar caso a grade do dia atual tenha mudado
   if (typeof renderRoteiro === 'function') renderRoteiro();

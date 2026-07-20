@@ -3,13 +3,30 @@
 // Keys use occurrence suffixes: [2ª], [3ª] for repeated programs
 // =====================================================
 /**
- * GRADE_BASE — Horários de referência por dia da semana extraídos da planilha de programação.
+ * GRADE_BASE_EDUCACAO — Horários de referência por dia da semana extraídos
+ * da planilha de programação do CANAL EDUCAÇÃO.
  * Estrutura: { gradeByDay: { "0": {...}, "1": {...}, ..., "6": {...} },
  *              gradeOrderByDay: { "0": [...], ... } }
  * Chave numérica em string: "0"=Dom, "1"=Seg, ..., "6"=Sáb.
  * Programas com múltiplas exibições usam sufixos: "VIDA DE MERENDEIRA [2ª]", "[3ª]" etc.
+ *
+ * [MOD canal-gov] Renomeado de `GRADE_BASE` para `GRADE_BASE_EDUCACAO` para
+ * deixar explícito que esta é a grade do Canal Educação. Um alias
+ * `GRADE_BASE` é mantido no fim do arquivo por compatibilidade com código
+ * legado que ainda referencie o nome antigo.
+ *
+ * NOTA DE MIGRAÇÃO: esta grade contém alguns títulos de slot que citam o
+ * Canal Gov (ex.: "GINT SERIADOS CANAL GOV", "DOCUMENTARIOS TV SENADO GOV"
+ * — horários fixos reservados para conteúdo do Gov dentro da grade linear
+ * da Educação). Optei por NÃO removê-los automaticamente nesta entrega,
+ * porque não dá para saber com segurança, só pelos dados, se eles marcam
+ * apenas uma reserva de horário (informação legítima da grade da
+ * Educação, para não sobrepor programa nesse intervalo) ou se são de fato
+ * conteúdo pertencente ao Gov que vazou para cá. Recomendo confirmar com
+ * a área de programação antes de excluir essas entradas — ver
+ * README-INTEGRACAO.md, seção "Pontos que precisam de decisão humana".
  */
-const GRADE_BASE = {
+const GRADE_BASE_EDUCACAO = {
   "gradeByDay": {
     "1": {
       "ESTAÇÕES": "06:00:00",
@@ -584,20 +601,71 @@ const GRADE_BASE = {
   }
 };
 
-// Load grade for a day-of-week, falling back to GRADE_BASE if not yet customized
-/** Carrega a grade para o dia dow priorizando customizações do usuário no localStorage. Se não houver customização, usa os dados base do GRADE_BASE (extraídos da planilha de programação de março/2026). */
-function loadGradeWithBase(dow) {
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
-  const customGrade = (saved.gradeByDay || {})[dow];
-  // If user has a saved grade for this day, use it; otherwise fall back to GRADE_BASE
-  if (customGrade && Object.keys(customGrade).length > 0) return customGrade;
-  return GRADE_BASE.gradeByDay[String(dow)] || {};
+// [MOD canal-gov] Alias de compatibilidade: código legado que ainda use o
+// nome antigo `GRADE_BASE` continua funcionando, apontando para a grade da
+// Educação (comportamento idêntico ao de antes desta entrega).
+const GRADE_BASE = GRADE_BASE_EDUCACAO;
+
+/**
+ * [MOD canal-gov] GRADE_BASE_GOV — grade de referência do Canal Gov.
+ * Começa VAZIA (nenhum horário-base cadastrado ainda) porque não recebi
+ * uma planilha de programação do Gov nesta entrega — só o mapeamento de
+ * types. Estrutura idêntica à de GRADE_BASE_EDUCACAO, para que
+ * loadGrade()/loadGradeOrder() (app.js) funcionem sem alterações extras
+ * assim que a grade real do Gov for cadastrada (pelo modal de importação
+ * de Grade Semanal, ou editando este arquivo diretamente).
+ */
+const GRADE_BASE_GOV = {
+  "gradeByDay": { "0": {}, "1": {}, "2": {}, "3": {}, "4": {}, "5": {}, "6": {} },
+  "gradeOrderByDay": { "0": [], "1": [], "2": [], "3": [], "4": [], "5": [], "6": [] }
+};
+
+/**
+ * [MOD canal-gov] Retorna a GRADE_BASE correta para a emissora ATUALMENTE
+ * selecionada — essencial para regra_1: sem isso, o Canal Gov cairia no
+ * fallback da grade do Canal Educação (GRADE_BASE_EDUCACAO) sempre que
+ * ainda não tivesse uma grade customizada salva.
+ * Depende de `window.Emissora` (definido em emissora.js); se ainda não
+ * estiver carregado, assume Educação (comportamento anterior, seguro).
+ */
+function gradeBaseAtual() {
+  const emissora = (typeof window !== 'undefined' && window.Emissora && window.Emissora.get)
+    ? window.Emissora.get()
+    : 'educacao';
+  return emissora === 'gov' ? GRADE_BASE_GOV : GRADE_BASE_EDUCACAO;
 }
 
-/** Carrega a ordem dos programas para o dia dow. Prioridade: localStorage → GRADE_BASE. */
+/**
+ * [MOD canal-gov] Mesma lógica de chaveStorage() do app.js, duplicada aqui
+ * porque este arquivo é carregado ANTES de app.js (ver DOCUMENTACAO.md
+ * §2, ordem de carga dos scripts). Se app.js já tiver definido
+ * `chaveStorage` (quando esta função for efetivamente CHAMADA, não quando
+ * for definida), usa a versão dele para não haver duas fontes de verdade.
+ */
+function _chaveStorageGrade(nomeBase) {
+  if (typeof chaveStorage === 'function') return chaveStorage(nomeBase);
+  const emissora = (typeof window !== 'undefined' && window.Emissora && window.Emissora.get)
+    ? window.Emissora.get()
+    : 'educacao';
+  return `${nomeBase}__${emissora}`;
+}
+
+// Load grade for a day-of-week, falling back to GRADE_BASE if not yet customized
+/** Carrega a grade para o dia dow priorizando customizações do usuário no localStorage. Se não houver customização, usa os dados base da emissora atual (GRADE_BASE_EDUCACAO ou GRADE_BASE_GOV — ver gradeBaseAtual()). */
+function loadGradeWithBase(dow) {
+  // [MOD canal-gov] chave de storage isolada por emissora (regra_1).
+  const saved = JSON.parse(localStorage.getItem(_chaveStorageGrade('roteiroApp')) || '{}');
+  const customGrade = (saved.gradeByDay || {})[dow];
+  // If user has a saved grade for this day, use it; otherwise fall back to GRADE_BASE da emissora atual
+  if (customGrade && Object.keys(customGrade).length > 0) return customGrade;
+  return gradeBaseAtual().gradeByDay[String(dow)] || {};
+}
+
+/** Carrega a ordem dos programas para o dia dow. Prioridade: localStorage → grade base da emissora atual. */
 function loadGradeOrderWithBase(dow) {
-  const saved = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
+  // [MOD canal-gov] chave de storage isolada por emissora (regra_1).
+  const saved = JSON.parse(localStorage.getItem(_chaveStorageGrade('roteiroApp')) || '{}');
   const customOrder = (saved.gradeOrderByDay || {})[dow];
   if (customOrder && customOrder.length > 0) return customOrder;
-  return GRADE_BASE.gradeOrderByDay[String(dow)] || [];
+  return gradeBaseAtual().gradeOrderByDay[String(dow)] || [];
 }

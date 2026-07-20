@@ -1,109 +1,82 @@
-/*
- * emissora.js — Suporte multi-emissora (Canal Educação / Canal GOV)
- *
- * Estratégia: monkey-patch em localStorage para namespace por emissora.
- * Este arquivo DEVE ser carregado ANTES de qualquer outro script que leia/grave
- * dados do app (app.js, parts-store.js, pecas_dia.js, grade_base.js, cloud-sync.js, etc.).
- *
- * Chaves POR emissora (isoladas):
- *   roteiroApp, roteiroRegras, roteiroBackupEnabled, roteiroProgramColors
- *
- * Chaves GLOBAIS (compartilhadas entre emissoras):
- *   emissoraAtiva, roteiroUsuario, roteiroTheme
- *
- * API pública:
- *   window.Emissora.get()             -> "educacao" | "gov" | null
- *   window.Emissora.set(id)           -> define e recarrega
- *   window.Emissora.clear()           -> remove seleção (volta à home)
- *   window.Emissora.label()           -> "Canal Educação" | "Canal GOV"
- *   window.Emissora.requireOrRedirect(url) -> se não houver, redireciona
- */
-(function () {
+// =====================================================
+// emissora.js — seleção de emissora ativa (Canal Educação / Canal Gov)
+// =====================================================
+// [MOD canal-gov] ARQUIVO NOVO desta entrega. app.js e grade_base.js já
+// referenciavam `window.Emissora.get()` (havia um comentário "[MOD]
+// Multi-emissora" em app.js), mas o arquivo que deveria implementar esse
+// objeto não estava presente nos arquivos recebidos — então foi criado
+// aqui, seguindo exatamente o contrato que app.js/grade_base.js esperam:
+// `window.Emissora.get()` devolve 'educacao' (padrão) ou 'gov'.
+//
+// ORDEM DE CARGA em index.html: este script deve vir ANTES de
+// grade_base.js e de app.js:
+//   <script src="emissora.js"></script>
+//   <script src="grade_base.js"></script>
+//   <script src="data.js"></script>
+//   <script src="parts-store.js"></script>
+//   ... (demais scripts do projeto, na ordem já documentada)
+//   <script src="app.js"></script>
+//
+// Persistência: a emissora escolhida fica em UMA chave de localStorage
+// própria ('emissoraAtiva'), separada de 'roteiroApp__<emissora>' — ela
+// não guarda peça/programa/roteiro nenhum, só a preferência de qual
+// emissora está selecionada, então não é afetada pelo isolamento da
+// regra_1 (não há o que vazar entre emissoras nesta chave).
+(function (window) {
   'use strict';
 
-  var STORAGE_KEY = 'emissoraAtiva';
+  var CHAVE = 'emissoraAtiva';
   var VALIDAS = ['educacao', 'gov'];
-  var LABELS  = { educacao: 'Canal Educação', gov: 'Canal GOV' };
+  var atual = null;
 
-  // Chaves que devem ser namespaced por emissora.
-  var PER_EMISSORA = [
-    'roteiroApp',
-    'roteiroRegras',
-    'roteiroBackupEnabled',
-    'roteiroProgramColors'
-  ];
+  function normalizar(valor) {
+    return VALIDAS.indexOf(valor) !== -1 ? valor : 'educacao';
+  }
 
-  function getEmissora() {
+  function carregarInicial() {
     try {
-      var v = window.localStorage.getItem(STORAGE_KEY);
-      return VALIDAS.indexOf(v) >= 0 ? v : null;
-    } catch (_) { return null; }
+      return normalizar(window.localStorage.getItem(CHAVE));
+    } catch (_) {
+      // localStorage bloqueado/indisponível (ex.: modo privado) — assume Educação.
+      return 'educacao';
+    }
   }
 
-  function prefixed(key) {
-    var e = getEmissora();
-    // Sem emissora definida, mantém a chave original (fluxo pré-multiemissora
-    // e páginas globais como home.html).
-    if (!e) return key;
-    if (PER_EMISSORA.indexOf(key) === -1) return key;
-    return key + '::' + e;
-  }
+  atual = carregarInicial();
 
-  // Referências originais antes de qualquer outro wrapper.
-  var proto = Object.getPrototypeOf(window.localStorage) || Storage.prototype;
-  var origGet    = proto.getItem.bind(window.localStorage);
-  var origSet    = proto.setItem.bind(window.localStorage);
-  var origRemove = proto.removeItem.bind(window.localStorage);
-
-  // Migração one-shot: se a chave namespaced ainda não existir e a chave
-  // legada existir, copia para o namespace "educacao" (dados existentes
-  // pertencem ao Canal Educação).
-  function migrarLegado() {
-    try {
-      PER_EMISSORA.forEach(function (k) {
-        var legado = origGet(k);
-        if (legado == null) return;
-        var alvo = k + '::educacao';
-        if (origGet(alvo) == null) origSet(alvo, legado);
-        // Mantemos a chave legada por compatibilidade retroativa; será
-        // sobrescrita naturalmente na primeira gravação sob namespace.
-      });
-    } catch (_) { /* silencioso */ }
-  }
-  migrarLegado();
-
-  // Sobrescreve na INSTÂNCIA localStorage (não no protótipo) para que
-  // wrappers posteriores (ex.: cloud-sync.js) enxerguem o método patcheado.
-  Object.defineProperty(window.localStorage, 'getItem', {
-    configurable: true, writable: true,
-    value: function (key) { return origGet(prefixed(key)); }
-  });
-  Object.defineProperty(window.localStorage, 'setItem', {
-    configurable: true, writable: true,
-    value: function (key, value) { return origSet(prefixed(key), value); }
-  });
-  Object.defineProperty(window.localStorage, 'removeItem', {
-    configurable: true, writable: true,
-    value: function (key) { return origRemove(prefixed(key)); }
-  });
-
+  /**
+   * API pública, consumida por app.js/grade_base.js:
+   *   Emissora.get()          → 'educacao' | 'gov'
+   *   Emissora.set(nome)      → troca a emissora ativa e recarrega a página
+   *                              (app.js guarda tudo em `state`/localStorage
+   *                              carregado no init(), então trocar de
+   *                              emissora em runtime sem recarregar
+   *                              deixaria o state antigo misturado com a
+   *                              nova emissora — por segurança, regra_1,
+   *                              preferimos sempre recarregar).
+   *   Emissora.list()         → ['educacao', 'gov']
+   *   Emissora.nomeExibicao()  → 'Canal Educação' | 'Canal Gov'
+   */
   window.Emissora = {
-    get: getEmissora,
-    set: function (id) {
-      if (VALIDAS.indexOf(id) === -1) return;
-      try { origSet(STORAGE_KEY, id); } catch (_) {}
+    get: function () {
+      return atual;
     },
-    clear: function () {
-      try { origRemove(STORAGE_KEY); } catch (_) {}
-    },
-    label: function () {
-      var e = getEmissora();
-      return e ? LABELS[e] : '';
-    },
-    requireOrRedirect: function (url) {
-      if (!getEmissora()) {
-        try { window.location.replace(url || 'home.html'); } catch (_) {}
+    set: function (nome, opts) {
+      var normalizado = normalizar(nome);
+      if (normalizado === atual) return;
+      atual = normalizado;
+      try { window.localStorage.setItem(CHAVE, atual); } catch (_) { /* silencioso */ }
+      var semReload = opts && opts.semReload;
+      if (!semReload && typeof window.location !== 'undefined' && window.location.reload) {
+        window.location.reload();
       }
+    },
+    list: function () {
+      return VALIDAS.slice();
+    },
+    nomeExibicao: function (nome) {
+      var alvo = normalizar(nome || atual);
+      return alvo === 'gov' ? 'Canal Gov' : 'Canal Educação';
     }
   };
-})();
+})(typeof window !== 'undefined' ? window : globalThis);

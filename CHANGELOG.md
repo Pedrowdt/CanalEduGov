@@ -8,15 +8,14 @@ e este projeto segue [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 Este arquivo é atualizado automaticamente por `npm run release` — não edite à mão
 (exceto para corrigir algo pontual).
 
-## [2.0.0] — 2026-07-17
+## [2.1.0] - 2026-07-09
 
-### Added
-- **Suporte a múltiplas emissoras (Canal Educação e Canal GOV).** Nova tela inicial `home.html` com seletor de emissora.
-- Módulo `emissora.js` que isola os dados por emissora no `localStorage` via namespace (`roteiroApp::educacao`, `roteiroApp::gov`, etc.). Nenhuma peça, programa, roteiro ou regra é compartilhada entre os dois canais.
-- Rótulo dinâmico da emissora ativa no topbar de `index.html` e `pecas-programas.html`, além de botão "⇆ Trocar emissora" que retorna à home.
-- Migração automática one-shot: dados existentes (pré-v2.0.0) são preservados sob o namespace do Canal Educação.
+### Adicionado
+- Suporte a janelas horárias que cruzam a meia-noite em `regrasTipos`. Se `fim < inicio`, a janela é interpretada como wraparound (ex.: `06:00`–`05:59` cobre o ciclo completo do roteiro, incluindo madrugada).
 
-### Changed
-- **BREAKING (organização de dados):** chaves `roteiroApp`, `roteiroRegras`, `roteiroBackupEnabled` e `roteiroProgramColors` passam a ser namespaced por emissora. Chaves globais preservadas: `roteiroUsuario`, `roteiroTheme`, `emissoraAtiva`.
-- `index.html` e `pecas-programas.html` redirecionam para `home.html` quando nenhuma emissora está selecionada.
-- Canal GOV inicia com bancos vazios (peças, programas, grade, roteiros).
+### Alterado
+- Padrões de `regrasTipos` de ECHM, ECHE, EINT, RCOM e EVNH agora terminam em `05:59` (madrugada). ECHE/RCOM/ECHM/EINT deixam de ser marcados como "fora da janela" quando inseridos entre 00:00 e 05:59.
+
+### Notas de migração
+- Usuários com regras customizadas mantêm suas configurações. Para cobrir madrugada, ajuste manualmente `fim` para `05:59` no painel Admin.
+

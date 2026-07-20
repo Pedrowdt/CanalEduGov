@@ -1,15 +1,9 @@
 {
-  "name": "roteiro-canal-educacao",
+  "name": "canal-gov-integration",
   "version": "2.0.0",
-  "type": "module",
+  "description": "app.js, data.js, grade_base.js (modificados) + emissora.js (novo): types do Canal Gov equivalentes ao Canal Educação, com isolamento entre emissoras.",
+  "private": true,
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "release": "standard-version"
-  },
-  "devDependencies": {
-    "vitest": "^2.0.0",
-    "jsdom": "^24.0.0",
-    "standard-version": "^9.5.0"
+    "test": "node --test tests/canal-gov.test.js"
   }
 }

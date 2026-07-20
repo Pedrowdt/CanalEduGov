@@ -11,14 +11,6 @@
 <!-- Supabase JS client — usado para login e sincronização em nuvem -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="version.js"></script>
-<!-- emissora.js DEVE vir antes de qualquer script que use localStorage. -->
-<script src="emissora.js"></script>
-<script>
-  // Sem emissora selecionada -> volta para a home.
-  if (window.Emissora && !window.Emissora.get()) {
-    window.location.replace('home.html');
-  }
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -173,6 +165,22 @@
   .filter-btn[data-t="RPOL"].active { color: var(--pink); border-color: var(--pink); background: rgba(232,121,166,.08); }
   .filter-btn[data-t="EVNH"].active { color: var(--muted); border-color: var(--muted); background: rgba(136,145,176,.08); }
   .filter-btn[data-t="RPRO"].active { color: var(--accent2); border-color: var(--accent2); background: rgba(124,92,247,.08); }
+  /* [MOD canal-gov] cores dos types do Gov — mesma cor do equivalente da
+     Educação (GCHM~ECHM, GCHE~ECHE, GINT~EINT, GVNH~EVNH, GPRO~RPRO);
+     GGV/GINS/GPIL (sem equivalente) ganharam cor própria. */
+  .filter-btn[data-t="GCHM"].active { color: var(--amber); border-color: var(--amber); background: rgba(240,167,66,.08); }
+  .filter-btn[data-t="GCHE"].active { color: var(--pink); border-color: var(--pink); background: rgba(236,72,153,.08); }
+  .filter-btn[data-t="GINT"].active { color: var(--cyan); border-color: var(--cyan); background: rgba(56,209,227,.08); }
+  .filter-btn[data-t="GVNH"].active { color: var(--muted); border-color: var(--muted); background: rgba(136,145,176,.08); }
+  .filter-btn[data-t="GPRO"].active { color: var(--accent2); border-color: var(--accent2); background: rgba(124,92,247,.08); }
+  .filter-btn[data-t="GGV"].active  { color: var(--green); border-color: var(--green); background: rgba(45,202,114,.08); }
+  .filter-btn[data-t="GINS"].active { color: var(--accent); border-color: var(--accent); background: rgba(47,111,224,.08); }
+  .filter-btn[data-t="GPIL"].active { color: var(--red); border-color: var(--red); background: rgba(232,93,93,.08); }
+  /* [MOD canal-gov] regra_1 na UI: só o grupo de filtros da emissora ATIVA
+     fica visível — <body data-emissora="..."> é atualizado pelo JS
+     (ver trocarEmissora() no fim do <body>). Padrão = educacao. */
+  body[data-emissora="gov"] .filter-btn-educacao { display: none; }
+  body:not([data-emissora="gov"]) .filter-btn-gov { display: none; }
   .pecas-list { flex: 1; overflow-y: auto; }
   .peca-item { padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: grab; transition: background .1s; display: flex; flex-direction: column; gap: 2px; }
   .peca-item:hover { background: var(--bg3); }
@@ -505,12 +513,95 @@
 <script>document.getElementById('version-badge').textContent = window.APP_VERSION ? 'v' + window.APP_VERSION : '';</script>
 
 <!-- ═══════════════════════════════════════════════════════
+     [MOD canal-gov] BYPASS DE AUTENTICAÇÃO — SÓ PARA TESTE LOCAL.
+
+     Como funciona:
+       - Fica DESLIGADO por padrão. Só ativa se a URL tiver "?dev=1"
+         (ex.: http://localhost:5500/index.html?dev=1) OU se
+         localStorage.devBypassAuth === '1' (fica ligado entre reloads
+         depois que você usa ?dev=1 uma vez).
+       - Quando ativado: esconde a tela de login, revela a .app
+         diretamente (pula o Hub também, pois cloudSyncOpenRoteiro()/
+         cloudSyncOpenPecasProgramas() são funções de cloud-sync.js, que
+         não roda nesse modo) e injeta os scripts do app manualmente.
+       - Quando DESLIGADO (padrão): este bloco não faz nada — o fluxo
+         normal com supabase-config.js + cloud-sync.js (login real,
+         sincronização com o Supabase) roda exatamente como hoje.
+
+     ⚠ IMPORTANTE — SCRIPTS_LOCAIS abaixo pode estar incompleta:
+       Eu só recebi e testei emissora.js, grade_base.js, data.js e
+       app.js. Pela documentação do projeto, o fluxo real também carrega
+       parts-store.js, api-sync.js, banco-manager.js e pecas_dia.js (o
+       próprio app.js chama funções como renderPecasDiaPanel(), que vêm
+       de um desses arquivos). Deixei os nomes mais prováveis já na
+       lista — se abrir o Console (F12) e aparecer "X is not defined",
+       confirme o nome exato do arquivo no seu projeto e ajuste a lista.
+
+     ⚠ NUNCA subir para produção com ?dev=1 documentado/divulgado — esse
+       modo pula o login de verdade. Antes de subir pro Supabase, não
+       precisa remover nada (fica desligado por padrão), mas se quiser
+       remover de vez, é só apagar este bloco inteiro.
+     ═══════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.search);
+  var bypassAtivo = params.has('dev') || localStorage.getItem('devBypassAuth') === '1';
+  if (!bypassAtivo) return; // fluxo normal (Supabase real) — nada muda.
+
+  // "?dev=1" liga o bypass; "?dev=0" desliga e limpa o localStorage.
+  if (params.get('dev') === '0') {
+    try { localStorage.removeItem('devBypassAuth'); } catch (_) {}
+    return;
+  }
+  try { localStorage.setItem('devBypassAuth', '1'); } catch (_) { /* modo privado etc. */ }
+
+  console.warn('[canal-gov] Bypass de autenticação ATIVO — modo de teste local, sem login real. Use ?dev=0 para desligar.');
+
+  var loginOverlay = document.getElementById('login-overlay');
+  if (loginOverlay) loginOverlay.style.display = 'none';
+
+  var statusEl = document.getElementById('cloud-sync-status');
+  if (statusEl) {
+    statusEl.style.display = 'block';
+    statusEl.textContent = '⚠ modo local — sem login/Supabase (?dev=0 para desligar)';
+  }
+
+  // Pula o Hub (suas opções chamam funções de cloud-sync.js, que não
+  // carrega neste modo) e mostra a .app diretamente, já na aba Roteiro.
+  var appEl = document.querySelector('.app');
+  if (appEl) appEl.style.display = '';
+
+  // Carrega os scripts do app EM ORDEM (async=false preserva a ordem de
+  // execução mesmo criando as tags dinamicamente — não precisa encadear
+  // onload). app.js chama init() sozinho no final dele.
+  var SCRIPTS_LOCAIS = [
+    'emissora.js',
+    'grade_base.js',
+    'data.js',
+    'parts-store.js',   // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+    'api-sync.js',      // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+    'banco-manager.js', // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+    'pecas_dia.js',     // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+    'app.js',
+  ];
+  SCRIPTS_LOCAIS.forEach(function (src) {
+    var s = document.createElement('script');
+    s.src = src;
+    s.async = false;
+    s.onerror = function () { console.error('[canal-gov] não achei "' + src + '" — remova da lista SCRIPTS_LOCAIS se esse arquivo não existir no seu projeto.'); };
+    document.body.appendChild(s);
+  });
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
      HUB — aparece depois do login, antes de entrar no
      Roteiro ou no Cadastro de Peças e Programas.
      ═══════════════════════════════════════════════════════ -->
 <div id="hub-overlay">
   <div class="hub-box">
-    <div class="hub-title">CANAL <span>EDUCAÇÃO</span> — o que você quer abrir?</div>
+    <div class="hub-title">CANAL <span id="hub-emissora-nome">EDUCAÇÃO</span> — o que você quer abrir?</div>
     <div class="hub-cards">
       <div class="hub-card" onclick="cloudSyncOpenRoteiro()">
         <div class="hub-card-icon">📋</div>
@@ -531,9 +622,8 @@
        TOPBAR: Logo, abas de navegação e botões de exportação
        ═══════════════════════════════════════════════════════ -->
   <header class="topbar">
-    <div class="logo" id="topbar-emissora-label">CANAL <span>EDUCAÇÃO</span> — ROTEIRO</div>
-    <a href="home.html" id="btn-trocar-emissora" title="Trocar emissora" style="font-size:11px;color:var(--muted);text-decoration:none;padding:4px 8px;border:1px solid var(--border);border-radius:6px;white-space:nowrap;">⇆ Trocar emissora</a>
-    <a href="pecas-programas.html" id="switch-app-link">⇆ Peças e Programas</a>
+    <div class="logo">CANAL <span id="logo-emissora-nome">EDUCAÇÃO</span> — ROTEIRO</div>
+    <a href="#" id="switch-app-link" onclick="cloudSyncBackToHub(event)">⇆ Peças e Programas</a>
     <nav class="tabs">
       <button class="tab active" onclick="showPanel('roteiro')">Roteiro do Dia</button>
       <button class="tab" onclick="showPanel('pecas')">Banco de Peças <span class="tab-badge" id="badge-pecas">0</span></button>
@@ -542,6 +632,18 @@
       <button class="tab" onclick="showPanel('grade-visual');renderGrade()">Grade Semanal</button>
     </nav>
     <div class="topbar-right">
+      <!-- [MOD canal-gov] Seletor de emissora ativa. Chama trocarEmissora()
+           (função definida no fim do <body>, junto com emissora.js) — que
+           usa window.Emissora.set() para trocar e recarregar a página já
+           na emissora escolhida (regra_1: cada emissora tem seu próprio
+           banco/roteiro/storage, então trocar sem recarregar deixaria
+           dado de uma emissora misturado com a outra na tela). -->
+      <select id="emissora-selector" onchange="trocarEmissora(this.value)"
+              class="btn btn-sm" title="Emissora ativa"
+              style="cursor:pointer;border-color:var(--accent2);color:var(--accent2)">
+        <option value="educacao">📘 Canal Educação</option>
+        <option value="gov">🏛️ Canal Gov</option>
+      </select>
       <select id="theme-selector" onchange="setTheme(this.value)"
               class="btn btn-sm" title="Tema visual"
               style="cursor:pointer">
@@ -593,13 +695,23 @@
         </div>
         <!-- Filtros de tipo da sidebar: clique para ativar/desativar -->
         <div class="pecas-filters" id="pecas-filters">
-          <button class="filter-btn" data-t="ECHM" onclick="toggleFilter('ECHM')">ECHM</button>
-          <button class="filter-btn" data-t="ECHE" onclick="toggleFilter('ECHE')">ECHE</button>
-          <button class="filter-btn" data-t="EINT" onclick="toggleFilter('EINT')">EINT</button>
-          <button class="filter-btn" data-t="RCOM" onclick="toggleFilter('RCOM')">RCOM</button>
-          <button class="filter-btn" data-t="RPOL" onclick="toggleFilter('RPOL')">RPOL</button>
-          <button class="filter-btn" data-t="EVNH" onclick="toggleFilter('EVNH')">EVNH</button>
-          <button class="filter-btn" data-t="RPRO" onclick="toggleFilter('RPRO')">PGM</button>
+          <button class="filter-btn filter-btn-educacao" data-t="ECHM" onclick="toggleFilter('ECHM')">ECHM</button>
+          <button class="filter-btn filter-btn-educacao" data-t="ECHE" onclick="toggleFilter('ECHE')">ECHE</button>
+          <button class="filter-btn filter-btn-educacao" data-t="EINT" onclick="toggleFilter('EINT')">EINT</button>
+          <button class="filter-btn filter-btn-educacao" data-t="RCOM" onclick="toggleFilter('RCOM')">RCOM</button>
+          <button class="filter-btn filter-btn-educacao" data-t="RPOL" onclick="toggleFilter('RPOL')">RPOL</button>
+          <button class="filter-btn filter-btn-educacao" data-t="EVNH" onclick="toggleFilter('EVNH')">EVNH</button>
+          <button class="filter-btn filter-btn-educacao" data-t="RPRO" onclick="toggleFilter('RPRO')">PGM</button>
+          <!-- [MOD canal-gov] mesmos 8 types do Gov (regra_1: só aparecem
+               quando <body data-emissora="gov">, via CSS acima) -->
+          <button class="filter-btn filter-btn-gov" data-t="GCHM" onclick="toggleFilter('GCHM')">GCHM</button>
+          <button class="filter-btn filter-btn-gov" data-t="GCHE" onclick="toggleFilter('GCHE')">GCHE</button>
+          <button class="filter-btn filter-btn-gov" data-t="GINT" onclick="toggleFilter('GINT')">GINT</button>
+          <button class="filter-btn filter-btn-gov" data-t="GVNH" onclick="toggleFilter('GVNH')">GVNH</button>
+          <button class="filter-btn filter-btn-gov" data-t="GGV" onclick="toggleFilter('GGV')">GGV</button>
+          <button class="filter-btn filter-btn-gov" data-t="GINS" onclick="toggleFilter('GINS')">GINS</button>
+          <button class="filter-btn filter-btn-gov" data-t="GPIL" onclick="toggleFilter('GPIL')">GPIL</button>
+          <button class="filter-btn filter-btn-gov" data-t="GPRO" onclick="toggleFilter('GPRO')">PGM</button>
         </div>
         <!-- Filtro de duração máxima da sidebar -->
         <div style="padding:4px 10px">
@@ -695,12 +807,20 @@
         <h2>Banco de Peças</h2>
         <div class="search"><input type="text" placeholder="Buscar por nome, code ou tempo..." id="pecas-panel-search" oninput="renderPecasPanelDebounced()"></div>
         <div class="filter-row" id="pecas-panel-filters">
-          <button class="filter-btn" data-t="ECHM" onclick="togglePanelFilter('ECHM')">ECHM</button>
-          <button class="filter-btn" data-t="ECHE" onclick="togglePanelFilter('ECHE')">ECHE</button>
-          <button class="filter-btn" data-t="EINT" onclick="togglePanelFilter('EINT')">EINT</button>
-          <button class="filter-btn" data-t="RCOM" onclick="togglePanelFilter('RCOM')">RCOM</button>
-          <button class="filter-btn" data-t="RPOL" onclick="togglePanelFilter('RPOL')">RPOL</button>
-          <button class="filter-btn" data-t="EVNH" onclick="togglePanelFilter('EVNH')">EVNH</button>
+          <button class="filter-btn filter-btn-educacao" data-t="ECHM" onclick="togglePanelFilter('ECHM')">ECHM</button>
+          <button class="filter-btn filter-btn-educacao" data-t="ECHE" onclick="togglePanelFilter('ECHE')">ECHE</button>
+          <button class="filter-btn filter-btn-educacao" data-t="EINT" onclick="togglePanelFilter('EINT')">EINT</button>
+          <button class="filter-btn filter-btn-educacao" data-t="RCOM" onclick="togglePanelFilter('RCOM')">RCOM</button>
+          <button class="filter-btn filter-btn-educacao" data-t="RPOL" onclick="togglePanelFilter('RPOL')">RPOL</button>
+          <button class="filter-btn filter-btn-educacao" data-t="EVNH" onclick="togglePanelFilter('EVNH')">EVNH</button>
+          <!-- [MOD canal-gov] equivalentes do Gov (regra_1: alternância via CSS) -->
+          <button class="filter-btn filter-btn-gov" data-t="GCHM" onclick="togglePanelFilter('GCHM')">GCHM</button>
+          <button class="filter-btn filter-btn-gov" data-t="GCHE" onclick="togglePanelFilter('GCHE')">GCHE</button>
+          <button class="filter-btn filter-btn-gov" data-t="GINT" onclick="togglePanelFilter('GINT')">GINT</button>
+          <button class="filter-btn filter-btn-gov" data-t="GVNH" onclick="togglePanelFilter('GVNH')">GVNH</button>
+          <button class="filter-btn filter-btn-gov" data-t="GGV" onclick="togglePanelFilter('GGV')">GGV</button>
+          <button class="filter-btn filter-btn-gov" data-t="GINS" onclick="togglePanelFilter('GINS')">GINS</button>
+          <button class="filter-btn filter-btn-gov" data-t="GPIL" onclick="togglePanelFilter('GPIL')">GPIL</button>
         </div>
         <!-- Filtro de duração máxima do banco de peças -->
         <select id="panel-dur-filter" onchange="renderPecasPanel()"
@@ -1276,21 +1396,5 @@
      injeta dinamicamente os scripts abaixo na mesma ordem original. -->
 <script src="supabase-config.js"></script>
 <script src="cloud-sync.js"></script>
-<script>
-  // Atualiza o rótulo da emissora ativa no topbar.
-  (function () {
-    try {
-      var el = document.getElementById('topbar-emissora-label');
-      if (!el || !window.Emissora) return;
-      var e = window.Emissora.get();
-      if (e === 'gov') {
-        el.innerHTML = 'CANAL <span>GOV</span> — ROTEIRO';
-        document.body.style.setProperty('--accent', '#2dca72');
-      } else if (e === 'educacao') {
-        el.innerHTML = 'CANAL <span>EDUCAÇÃO</span> — ROTEIRO';
-      }
-    } catch (_) {}
-  })();
-</script>
 </body>
 </html>

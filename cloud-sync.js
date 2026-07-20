@@ -37,6 +37,50 @@ const SCRIPTS_TO_LOAD = [
   'banco-manager.js',
 ];
 
+// =====================================================
+// [MOD canal-gov] ISOLAMENTO ENTRE EMISSORAS (regra_1)
+// =====================================================
+// Antes desta entrega, TODA a sincronização em nuvem usava uma chave de
+// localStorage fixa ('roteiroApp'/'roteiroRegras') e UMA linha única e
+// compartilhada no Supabase (id = WORKSPACE_ID, sempre 'workspace') —
+// ou seja, Canal Educação e Canal Gov cairiam no MESMO balde de dados na
+// nuvem. Os dois helpers abaixo resolvem isso, e são usados em TODO
+// lugar deste arquivo que antes lia/gravava 'roteiroApp'/'roteiroRegras'
+// ou usava WORKSPACE_ID direto.
+//
+// Depende de window.Emissora (emissora.js) — que agora precisa ser
+// carregado ESTATICAMENTE em index.html, ANTES deste arquivo, porque
+// fetchAndMergeCloudData() usa isso antes mesmo de app.js (que teria
+// chaveStorage()) ser carregado dinamicamente. Ver index.html.
+
+/** Emissora ativa ('educacao' | 'gov'). Fallback seguro para 'educacao'. */
+function emissoraAtualCloudSync() {
+  return (typeof window !== 'undefined' && window.Emissora && window.Emissora.get)
+    ? window.Emissora.get()
+    : 'educacao';
+}
+
+/**
+ * Mesma lógica de chaveStorage() em app.js (duplicada aqui de propósito —
+ * ver nota acima sobre ordem de carregamento). Os dois PRECISAM produzir
+ * exatamente a mesma chave para a mesma emissora, senão a sincronização
+ * lê/grava num lugar e o app lê/grava em outro.
+ */
+function chaveStorageCloudSync(nomeBase) {
+  return `${nomeBase}__${emissoraAtualCloudSync()}`;
+}
+
+/**
+ * Id da linha compartilhada no Supabase (tabela shared_data) para a
+ * emissora ativa — ex.: 'workspace_educacao' / 'workspace_gov'. Antes
+ * era sempre WORKSPACE_ID puro ('workspace'), compartilhado entre as
+ * duas emissoras. Não precisa de migração de schema: `id` já é texto
+ * livre na tabela shared_data.
+ */
+function workspaceIdAtual() {
+  return `${WORKSPACE_ID}_${emissoraAtualCloudSync()}`;
+}
+
 let supabaseClient = null;
 let currentUser = null;
 let scriptsLoaded = false;
@@ -132,20 +176,28 @@ function loadScriptsSequentially() {
 // BUSCA DADOS DA NUVEM E MESCLA NO localStorage
 // =====================================================
 async function fetchAndMergeCloudData(user) {
+  // [MOD canal-gov] workspaceIdAtual() em vez de WORKSPACE_ID puro — cada
+  // emissora lê/grava sua PRÓPRIA linha em shared_data (regra_1).
   const { data: shared } = await supabaseClient
     .from('shared_data')
     .select('*')
-    .eq('id', WORKSPACE_ID)
+    .eq('id', workspaceIdAtual())
     .maybeSingle();
 
+  // [MOD canal-gov] filtra também por emissora — precisa da coluna
+  // "emissora" em user_data (ver migration-canal-gov.sql desta entrega).
+  // Sem isso, roteiros/peças do dia da Educação e do Gov do MESMO login
+  // cairiam na mesma linha (regra_1).
   const { data: userRow } = await supabaseClient
     .from('user_data')
     .select('*')
     .eq('user_id', user.id)
+    .eq('emissora', emissoraAtualCloudSync())
     .maybeSingle();
 
-  const localRaw    = JSON.parse(localStorage.getItem('roteiroApp') || '{}');
-  const localRegras = JSON.parse(localStorage.getItem('roteiroRegras') || '{}');
+  // [MOD canal-gov] chave de storage isolada por emissora.
+  const localRaw    = JSON.parse(localStorage.getItem(chaveStorageCloudSync('roteiroApp')) || '{}');
+  const localRegras = JSON.parse(localStorage.getItem(chaveStorageCloudSync('roteiroRegras')) || '{}');
 
   const sharedEmpty  = !shared || (!(shared.pecas || []).length && !(shared.programas || []).length);
   const localHasData = (localRaw.pecas && localRaw.pecas.length) || (localRaw.programas && localRaw.programas.length);
@@ -155,7 +207,7 @@ async function fetchAndMergeCloudData(user) {
   if (sharedEmpty && localHasData) {
     // Primeiro acesso: este navegador já tinha dados locais (uso anterior
     // sem login) e a nuvem ainda está vazia -> usamos os dados locais como
-    // ponto de partida do banco compartilhado da equipe.
+    // ponto de partida do banco compartilhado da equipe (da emissora ativa).
     merged.pecas           = localRaw.pecas || [];
     merged.programas       = localRaw.programas || [];
     merged.grade           = localRaw.grade || {};
@@ -164,7 +216,7 @@ async function fetchAndMergeCloudData(user) {
     merged.gradeOrderByDay = localRaw.gradeOrderByDay || {};
 
     await supabaseClient.from('shared_data').upsert({
-      id: WORKSPACE_ID,
+      id: workspaceIdAtual(), // [MOD canal-gov]
       pecas: merged.pecas,
       programas: merged.programas,
       grade: merged.grade,
@@ -176,7 +228,7 @@ async function fetchAndMergeCloudData(user) {
       updated_at: new Date().toISOString(),
     });
 
-    localStorage.setItem('roteiroRegras', JSON.stringify(localRegras));
+    localStorage.setItem(chaveStorageCloudSync('roteiroRegras'), JSON.stringify(localRegras)); // [MOD canal-gov]
   } else {
     merged.pecas           = shared?.pecas || [];
     merged.programas       = shared?.programas || [];
@@ -185,22 +237,25 @@ async function fetchAndMergeCloudData(user) {
     merged.gradeOrder      = shared?.grade_order || {};
     merged.gradeOrderByDay = shared?.grade_order_by_day || {};
 
-    localStorage.setItem('roteiroRegras', JSON.stringify(shared?.regras || {}));
+    localStorage.setItem(chaveStorageCloudSync('roteiroRegras'), JSON.stringify(shared?.regras || {})); // [MOD canal-gov]
   }
 
   merged.roteiros   = userRow?.roteiros   || localRaw.roteiros   || {};
   merged.pecasDia   = userRow?.pecas_dia  || localRaw.pecasDia   || {};
   merged.pecasFixas = localRaw.pecasFixas || [];
 
-  _origSetItem.call(localStorage, 'roteiroApp', JSON.stringify(merged));
+  _origSetItem.call(localStorage, chaveStorageCloudSync('roteiroApp'), JSON.stringify(merged)); // [MOD canal-gov]
 
   if (!userRow) {
+    // [MOD canal-gov] onConflict explícito porque a chave única de
+    // user_data passa a ser (user_id, emissora) — não só user_id.
     await supabaseClient.from('user_data').upsert({
       user_id: user.id,
+      emissora: emissoraAtualCloudSync(), // [MOD canal-gov]
       roteiros: merged.roteiros,
       pecas_dia: merged.pecasDia,
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: 'user_id,emissora' }); // [MOD canal-gov]
   }
 }
 

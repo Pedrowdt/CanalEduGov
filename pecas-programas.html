@@ -3,18 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Peças e Programas — Canaledu</title>
+<title>Peças e Programas — Canal Educação</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="supabase-config.js"></script>
 <script src="version.js"></script>
-<script src="emissora.js"></script>
-<script>
-  if (window.Emissora && !window.Emissora.get()) {
-    window.location.replace('home.html');
-  }
-</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;background:#F5F5F3;color:#1a1a18;height:100vh;display:flex;flex-direction:column;overflow:hidden}
@@ -149,8 +143,6 @@ tbody tr:hover{background:#f5f5f3}
 
 <div class="topnav">
   <a href="index.html">← Voltar</a>
-  <span id="emissora-label" style="font-weight:600;margin-left:6px"></span>
-  <a href="home.html" style="margin-left:10px;font-size:12px;opacity:0.75">⇆ Trocar emissora</a>
   <div class="right">
     <span class="sync" id="sync-status"></span>
     <span id="user-email"></span>
@@ -309,13 +301,5 @@ tbody tr:hover{background:#f5f5f3}
 </div>
 
 <script src="pecas-programas.js"></script>
-<script>
-  (function () {
-    try {
-      var el = document.getElementById('emissora-label');
-      if (el && window.Emissora) el.textContent = window.Emissora.label();
-    } catch (_) {}
-  })();
-</script>
 </body>
 </html>
