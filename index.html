@@ -558,39 +558,46 @@
 
   console.warn('[canal-gov] Bypass de autenticação ATIVO — modo de teste local, sem login real. Use ?dev=0 para desligar.');
 
-  var loginOverlay = document.getElementById('login-overlay');
-  if (loginOverlay) loginOverlay.style.display = 'none';
+  // [FIX] Este <script> roda durante o parsing do HTML, ANTES da div .app
+  // (declarada mais abaixo) existir no DOM. Por isso todo o código que
+  // depende de elementos da página precisa esperar o DOMContentLoaded —
+  // caso contrário document.querySelector('.app') retorna null, o "if"
+  // falha em silêncio, e a página fica em branco sem nenhum erro no console.
+  document.addEventListener('DOMContentLoaded', function () {
+    var loginOverlay = document.getElementById('login-overlay');
+    if (loginOverlay) loginOverlay.style.display = 'none';
 
-  var statusEl = document.getElementById('cloud-sync-status');
-  if (statusEl) {
-    statusEl.style.display = 'block';
-    statusEl.textContent = '⚠ modo local — sem login/Supabase (?dev=0 para desligar)';
-  }
+    var statusEl = document.getElementById('cloud-sync-status');
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.textContent = '⚠ modo local — sem login/Supabase (?dev=0 para desligar)';
+    }
 
-  // Pula o Hub (suas opções chamam funções de cloud-sync.js, que não
-  // carrega neste modo) e mostra a .app diretamente, já na aba Roteiro.
-  var appEl = document.querySelector('.app');
-  if (appEl) appEl.style.display = '';
+    // Pula o Hub (suas opções chamam funções de cloud-sync.js, que não
+    // carrega neste modo) e mostra a .app diretamente, já na aba Roteiro.
+    var appEl = document.querySelector('.app');
+    if (appEl) appEl.style.display = '';
 
-  // Carrega os scripts do app EM ORDEM (async=false preserva a ordem de
-  // execução mesmo criando as tags dinamicamente — não precisa encadear
-  // onload). app.js chama init() sozinho no final dele.
-  var SCRIPTS_LOCAIS = [
-    'emissora.js',
-    'grade_base.js',
-    'data.js',
-    'parts-store.js',   // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
-    'api-sync.js',      // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
-    'banco-manager.js', // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
-    'pecas_dia.js',     // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
-    'app.js',
-  ];
-  SCRIPTS_LOCAIS.forEach(function (src) {
-    var s = document.createElement('script');
-    s.src = src;
-    s.async = false;
-    s.onerror = function () { console.error('[canal-gov] não achei "' + src + '" — remova da lista SCRIPTS_LOCAIS se esse arquivo não existir no seu projeto.'); };
-    document.body.appendChild(s);
+    // Carrega os scripts do app EM ORDEM (async=false preserva a ordem de
+    // execução mesmo criando as tags dinamicamente — não precisa encadear
+    // onload). app.js chama init() sozinho no final dele.
+    var SCRIPTS_LOCAIS = [
+      'emissora.js',
+      'grade_base.js',
+      'data.js',
+      'parts-store.js',   // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+      'api-sync.js',      // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+      'banco-manager.js', // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+      'pecas_dia.js',     // ⚠ não confirmado nesta entrega — ajuste se o nome for outro
+      'app.js',
+    ];
+    SCRIPTS_LOCAIS.forEach(function (src) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.async = false;
+      s.onerror = function () { console.error('[canal-gov] não achei "' + src + '" — remova da lista SCRIPTS_LOCAIS se esse arquivo não existir no seu projeto.'); };
+      document.body.appendChild(s);
+    });
   });
 })();
 </script>
